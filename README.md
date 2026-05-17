@@ -2,6 +2,8 @@
 
 A multi-format log file search and analysis tool for Windows, Linux, and macOS. Search, filter, and correlate log files across directory trees from the command line or a graphical interface.
 
+* This project was written almost entirely using Claude Code and Codex.
+
 ## Features
 
 - **Multi-format timestamp detection** — automatically identifies the timestamp format used in each log file from 18 built-in formats (ISO 8601, Apache, syslog, Android, Spark, HDFS, BGL, Proxifier, and more)

@@ -18,13 +18,15 @@ named config files.
 
 from __future__ import annotations
 
+import calendar
 import json
 import threading
 import tkinter as tk
+from datetime import date, datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from log_master.core.config import build_processor_config
+from log_master.core.config import build_processor_config, parse_datetime
 from log_master.core.expression_analyzer import SearchConfig
 from log_master.core.file_finder import FileFindCriteria
 from log_master.core.log_processor import LogProcessor, ProcessorConfig, ProcessorResult
@@ -67,6 +69,192 @@ def _labeled_spin(parent, label: str, row: int, col: int = 0,
     sb = ttk.Spinbox(parent, textvariable=var, from_=from_, to=to, width=8)
     sb.grid(row=row, column=col + 1, sticky="w", padx=4, pady=2)
     return var
+
+
+class DateTimeEntry(ttk.Frame):
+    """Compact date picker plus optional HH:MM:SS entry."""
+
+    def __init__(self, parent, width: int = 20):
+        super().__init__(parent)
+        self._date_var = tk.StringVar()
+        self._hour_var = tk.StringVar()
+        self._minute_var = tk.StringVar()
+        self._second_var = tk.StringVar()
+        self._popup: tk.Toplevel | None = None
+        today = date.today()
+        self._calendar_year = today.year
+        self._calendar_month = today.month
+
+        ttk.Entry(self, textvariable=self._date_var, width=11).grid(
+            row=0, column=0, sticky="w")
+        ttk.Button(self, text="Pick", command=self._show_calendar, width=5).grid(
+            row=0, column=1, padx=(4, 0))
+
+        time_frame = ttk.Frame(self)
+        time_frame.grid(row=0, column=2, padx=(8, 0), sticky="w")
+        ttk.Spinbox(
+            time_frame, textvariable=self._hour_var, from_=0, to=23,
+            width=3, wrap=True, format="%02.0f",
+        ).grid(row=0, column=0)
+        ttk.Label(time_frame, text=":").grid(row=0, column=1)
+        ttk.Spinbox(
+            time_frame, textvariable=self._minute_var, from_=0, to=59,
+            width=3, wrap=True, format="%02.0f",
+        ).grid(row=0, column=2)
+        ttk.Label(time_frame, text=":").grid(row=0, column=3)
+        ttk.Spinbox(
+            time_frame, textvariable=self._second_var, from_=0, to=59,
+            width=3, wrap=True, format="%02.0f",
+        ).grid(row=0, column=4)
+
+        ttk.Button(self, text="Clear", command=self.clear, width=6).grid(
+            row=0, column=3, padx=(4, 0))
+
+    def get(self) -> str:
+        date_text = self._date_var.get().strip()
+        time_text = self._time_text()
+        if date_text and time_text:
+            return f"{date_text}T{time_text}"
+        return date_text or time_text
+
+    def set(self, value: str) -> None:
+        text = str(value or "").strip()
+        if not text:
+            self.clear()
+            return
+        if "T" in text:
+            date_text, time_text = text.split("T", 1)
+            self._date_var.set(date_text)
+            self._set_time(time_text)
+        else:
+            self._date_var.set(text)
+            self._clear_time()
+
+    def clear(self) -> None:
+        self._date_var.set("")
+        self._clear_time()
+
+    def _time_text(self) -> str:
+        raw_parts = [
+            self._hour_var.get().strip(),
+            self._minute_var.get().strip(),
+            self._second_var.get().strip(),
+        ]
+        if not any(raw_parts):
+            return ""
+        try:
+            hour, minute, second = (int(part or "0") for part in raw_parts)
+        except ValueError:
+            return ":".join(raw_parts)
+        return f"{hour:02d}:{minute:02d}:{second:02d}"
+
+    def _set_time(self, value: str) -> None:
+        parts = value.split(":")
+        self._hour_var.set(parts[0] if len(parts) > 0 else "")
+        self._minute_var.set(parts[1] if len(parts) > 1 else "")
+        self._second_var.set(parts[2] if len(parts) > 2 else "")
+
+    def _clear_time(self) -> None:
+        self._hour_var.set("")
+        self._minute_var.set("")
+        self._second_var.set("")
+
+    def _show_calendar(self) -> None:
+        if self._popup is not None and self._popup.winfo_exists():
+            self._popup.lift()
+            return
+
+        current = self._selected_date()
+        self._calendar_year = current.year
+        self._calendar_month = current.month
+
+        popup = tk.Toplevel(self)
+        popup.title("Select date")
+        popup.transient(self.winfo_toplevel())
+        popup.resizable(False, False)
+        self._popup = popup
+        self._position_popup(popup)
+        self._draw_calendar()
+
+    def _selected_date(self) -> date:
+        try:
+            return date.fromisoformat(self._date_var.get().strip())
+        except ValueError:
+            return date.today()
+
+    def _position_popup(self, popup: tk.Toplevel) -> None:
+        self.update_idletasks()
+        x = self.winfo_rootx()
+        y = self.winfo_rooty() + self.winfo_height()
+        popup.geometry(f"+{x}+{y}")
+
+    def _draw_calendar(self) -> None:
+        if self._popup is None:
+            return
+        for child in self._popup.winfo_children():
+            child.destroy()
+
+        frame = ttk.Frame(self._popup, padding=6)
+        frame.grid(row=0, column=0, sticky="nsew")
+
+        ttk.Button(frame, text="<", width=3, command=self._prev_month).grid(
+            row=0, column=0, sticky="w")
+        ttk.Label(
+            frame,
+            text=f"{calendar.month_name[self._calendar_month]} {self._calendar_year}",
+            anchor="center",
+            width=18,
+        ).grid(row=0, column=1, columnspan=5, sticky="ew")
+        ttk.Button(frame, text=">", width=3, command=self._next_month).grid(
+            row=0, column=6, sticky="e")
+
+        for col, name in enumerate(("Mo", "Tu", "We", "Th", "Fr", "Sa", "Su")):
+            ttk.Label(frame, text=name, anchor="center", width=4).grid(
+                row=1, column=col, pady=(4, 2))
+
+        weeks = calendar.monthcalendar(self._calendar_year, self._calendar_month)
+        for row, week in enumerate(weeks, start=2):
+            for col, day in enumerate(week):
+                if day == 0:
+                    ttk.Label(frame, text="", width=4).grid(row=row, column=col)
+                else:
+                    ttk.Button(
+                        frame,
+                        text=str(day),
+                        width=4,
+                        command=lambda d=day: self._choose_day(d),
+                    ).grid(row=row, column=col, padx=1, pady=1)
+
+    def _prev_month(self) -> None:
+        if self._calendar_month == 1:
+            self._calendar_year -= 1
+            self._calendar_month = 12
+        else:
+            self._calendar_month -= 1
+        self._draw_calendar()
+
+    def _next_month(self) -> None:
+        if self._calendar_month == 12:
+            self._calendar_year += 1
+            self._calendar_month = 1
+        else:
+            self._calendar_month += 1
+        self._draw_calendar()
+
+    def _choose_day(self, day: int) -> None:
+        self._date_var.set(
+            date(self._calendar_year, self._calendar_month, day).isoformat())
+        if self._popup is not None:
+            self._popup.destroy()
+            self._popup = None
+
+
+def _labeled_datetime(parent, label: str, row: int, col: int = 0) -> DateTimeEntry:
+    ttk.Label(parent, text=label).grid(row=row, column=col, sticky="w",
+                                       padx=4, pady=2)
+    widget = DateTimeEntry(parent)
+    widget.grid(row=row, column=col + 1, sticky="w", padx=4, pady=2)
+    return widget
 
 
 def _pattern_list_widget(parent, label: str, row: int) -> tk.Listbox:
@@ -162,11 +350,13 @@ class FilesTab(ttk.Frame):
         self._min_size_var = _labeled_entry(self, "Min size (bytes):", 4, width=12)
         self._max_size_var = _labeled_entry(self, "Max size (bytes):", 5, width=12)
 
-        self._mod_after_var = _labeled_entry(self, "Modified after:", 6, width=20)
-        ttk.Label(self, text="YYYY-MM-DD").grid(row=6, column=2, sticky="w", padx=4)
+        self._mod_after_var = _labeled_datetime(self, "Modified after:", 6)
+        ttk.Label(self, text="Date and optional time").grid(
+            row=6, column=2, sticky="w", padx=4)
 
-        self._mod_before_var = _labeled_entry(self, "Modified before:", 7, width=20)
-        ttk.Label(self, text="YYYY-MM-DD").grid(row=7, column=2, sticky="w", padx=4)
+        self._mod_before_var = _labeled_datetime(self, "Modified before:", 7)
+        ttk.Label(self, text="Date and optional time").grid(
+            row=7, column=2, sticky="w", padx=4)
 
         self._inc_dir_var = _labeled_entry(self, "Include dirs:", 8, width=30)
         ttk.Label(self, text="(comma-separated globs)").grid(
@@ -209,16 +399,11 @@ class FilesTab(ttk.Frame):
         self._exc_dir_var.set(state.get("exclude_dirs", ""))
 
     def build_criteria(self) -> FileFindCriteria:
-        from datetime import datetime
-
         def parse_date(s: str, field: str) -> datetime | None:
             s = s.strip()
             if not s:
                 return None
-            try:
-                return datetime.strptime(s, "%Y-%m-%d")
-            except ValueError:
-                raise ValueError(f"{field}: expected YYYY-MM-DD, got '{s}'")
+            return parse_datetime(s, field)
 
         def parse_int(var: tk.StringVar, field: str) -> int | None:
             s = var.get().strip()
@@ -262,12 +447,12 @@ class AnalysisTab(ttk.Frame):
         opts.columnconfigure(1, weight=1)
         opts.columnconfigure(3, weight=1)
 
-        self._time_from_var = _labeled_entry(opts, "Time from:", 0, width=22)
-        ttk.Label(opts, text="YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS").grid(
+        self._time_from_var = _labeled_datetime(opts, "Time from:", 0)
+        ttk.Label(opts, text="Date and optional time").grid(
             row=0, column=2, sticky="w", padx=4)
 
-        self._time_to_var = _labeled_entry(opts, "Time to:", 1, width=22)
-        ttk.Label(opts, text="YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS").grid(
+        self._time_to_var = _labeled_datetime(opts, "Time to:", 1)
+        ttk.Label(opts, text="Date and optional time").grid(
             row=1, column=2, sticky="w", padx=4)
 
         self._case_var = tk.BooleanVar(value=False)
@@ -299,18 +484,11 @@ class AnalysisTab(ttk.Frame):
         self._context_var.set(state.get("context_lines", "0"))
 
     def build_config(self) -> SearchConfig:
-        from datetime import datetime
-
         def parse_dt(s: str, field: str):
             s = s.strip()
             if not s:
                 return None
-            for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
-                try:
-                    return datetime.strptime(s, fmt)
-                except ValueError:
-                    pass
-            raise ValueError(f"{field}: expected YYYY-MM-DD[THH:MM:SS], got '{s}'")
+            return parse_datetime(s, field)
 
         ctx = self._context_var.get().strip()
         try:
