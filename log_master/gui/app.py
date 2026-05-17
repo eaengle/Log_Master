@@ -10,10 +10,15 @@ Tabs:
 The Run button dispatches LogProcessor in a background thread so the UI
 stays responsive.  Results are posted back to the main thread via
 root.after(0, callback).
+
+UI state is automatically saved to ~/.logmaster/last_session.json on exit
+and restored on the next launch.  Use File > Load/Save Config to exchange
+named config files.
 """
 
 from __future__ import annotations
 
+import json
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -23,6 +28,18 @@ from log_master.core.expression_analyzer import SearchConfig
 from log_master.core.file_finder import FileFindCriteria
 from log_master.core.log_processor import LogProcessor, ProcessorConfig, ProcessorResult
 from log_master.core.output_writer import Column, OutputConfig, OutputMode, SortOrder
+
+# Path used for automatic session save/restore.
+_AUTOSAVE_PATH = Path.home() / ".logmaster" / "last_session.json"
+
+# Column enum ↔ JSON key mapping (stable across renames).
+_COL_KEY: dict[Column, str] = {
+    Column.TIMESTAMP:   "timestamp",
+    Column.SOURCE_FILE: "source_file",
+    Column.LINE_NO:     "line_no",
+    Column.PATTERN:     "pattern",
+    Column.TEXT:        "text",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +102,12 @@ def _pattern_list_widget(parent, label: str, row: int) -> tk.Listbox:
 
 def _listbox_items(lb: tk.Listbox) -> list[str]:
     return list(lb.get(0, tk.END))
+
+
+def _set_listbox(lb: tk.Listbox, items: list[str]) -> None:
+    lb.delete(0, tk.END)
+    for item in items:
+        lb.insert(tk.END, item)
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +181,32 @@ class FilesTab(ttk.Frame):
     def _csv(self, var: tk.StringVar) -> list[str]:
         return [v.strip() for v in var.get().split(",") if v.strip()]
 
+    def get_state(self) -> dict:
+        return {
+            "roots":          _listbox_items(self._roots_lb),
+            "globs":          self._globs_var.get(),
+            "extensions":     self._ext_var.get(),
+            "max_depth":      self._depth_var.get(),
+            "min_size":       self._min_size_var.get(),
+            "max_size":       self._max_size_var.get(),
+            "modified_after": self._mod_after_var.get(),
+            "modified_before":self._mod_before_var.get(),
+            "include_dirs":   self._inc_dir_var.get(),
+            "exclude_dirs":   self._exc_dir_var.get(),
+        }
+
+    def set_state(self, state: dict) -> None:
+        _set_listbox(self._roots_lb, state.get("roots", []))
+        self._globs_var.set(state.get("globs", ""))
+        self._ext_var.set(state.get("extensions", ""))
+        self._depth_var.set(state.get("max_depth", ""))
+        self._min_size_var.set(state.get("min_size", ""))
+        self._max_size_var.set(state.get("max_size", ""))
+        self._mod_after_var.set(state.get("modified_after", ""))
+        self._mod_before_var.set(state.get("modified_before", ""))
+        self._inc_dir_var.set(state.get("include_dirs", ""))
+        self._exc_dir_var.set(state.get("exclude_dirs", ""))
+
     def build_criteria(self) -> FileFindCriteria:
         from datetime import datetime
 
@@ -227,6 +276,26 @@ class AnalysisTab(ttk.Frame):
 
         self._context_var = _labeled_spin(opts, "Context lines:", 3,
                                           from_=0, to=50, default="0")
+
+    def get_state(self) -> dict:
+        return {
+            "include_patterns":   _listbox_items(self._include_lb),
+            "exclude_patterns":   _listbox_items(self._exclude_lb),
+            "skip_file_patterns": _listbox_items(self._skip_lb),
+            "time_from":          self._time_from_var.get(),
+            "time_to":            self._time_to_var.get(),
+            "case_insensitive":   self._case_var.get(),
+            "context_lines":      self._context_var.get(),
+        }
+
+    def set_state(self, state: dict) -> None:
+        _set_listbox(self._include_lb, state.get("include_patterns", []))
+        _set_listbox(self._exclude_lb, state.get("exclude_patterns", []))
+        _set_listbox(self._skip_lb,    state.get("skip_file_patterns", []))
+        self._time_from_var.set(state.get("time_from", ""))
+        self._time_to_var.set(state.get("time_to", ""))
+        self._case_var.set(state.get("case_insensitive", False))
+        self._context_var.set(state.get("context_lines", "0"))
 
     def build_config(self) -> SearchConfig:
         from datetime import datetime
@@ -371,6 +440,35 @@ class OutputTab(ttk.Frame):
             return int(s) if s else 1
         except ValueError:
             return 1
+
+    def get_state(self) -> dict:
+        return {
+            "output_dir":      self._out_dir_var.get(),
+            "mode_single":     self._mode_single.get(),
+            "mode_pattern":    self._mode_pattern.get(),
+            "mode_source":     self._mode_source.get(),
+            "mode_parent":     self._mode_parent.get(),
+            "sort":            self._sort_var.get(),
+            "columns":         {_COL_KEY[col]: var.get()
+                                for col, var in self._col_vars.items()},
+            "include_context": self._inc_ctx_var.get(),
+            "workers":         self._workers_var.get(),
+            "base_path":       self._base_path_var.get(),
+        }
+
+    def set_state(self, state: dict) -> None:
+        self._out_dir_var.set(state.get("output_dir", ""))
+        self._mode_single.set(state.get("mode_single", True))
+        self._mode_pattern.set(state.get("mode_pattern", False))
+        self._mode_source.set(state.get("mode_source", False))
+        self._mode_parent.set(state.get("mode_parent", False))
+        self._sort_var.set(state.get("sort", "file-order"))
+        cols = state.get("columns", {})
+        for col, var in self._col_vars.items():
+            var.set(cols.get(_COL_KEY[col], True))
+        self._inc_ctx_var.set(state.get("include_context", True))
+        self._workers_var.set(state.get("workers", "1"))
+        self._base_path_var.set(state.get("base_path", ""))
 
     def build_config(self) -> OutputConfig:
         out_dir = self.output_dir()
@@ -521,6 +619,10 @@ class App(tk.Tk):
         self.geometry("760x640")
         self.minsize(600, 500)
 
+        self._current_config_path: Path | None = None
+
+        self._build_menu()
+
         self._nb = ttk.Notebook(self)
         self._nb.pack(fill="both", expand=True, padx=6, pady=6)
 
@@ -533,6 +635,126 @@ class App(tk.Tk):
         self._nb.add(self._analysis_tab, text="  Analysis  ")
         self._nb.add(self._output_tab,   text="  Output  ")
         self._nb.add(self._results_tab,  text="  Results  ")
+
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._load_autosave()
+
+    # ------------------------------------------------------------------
+    # Menu
+    # ------------------------------------------------------------------
+
+    def _build_menu(self) -> None:
+        menubar = tk.Menu(self)
+
+        file_menu = tk.Menu(menubar, tearoff=False)
+        file_menu.add_command(label="Load Config…",    command=self._load_config,
+                              accelerator="Ctrl+O")
+        file_menu.add_command(label="Save Config",     command=self._save_config,
+                              accelerator="Ctrl+S")
+        file_menu.add_command(label="Save Config As…", command=self._save_config_as,
+                              accelerator="Ctrl+Shift+S")
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit",            command=self._on_close)
+
+        menubar.add_cascade(label="File", menu=file_menu)
+        self.configure(menu=menubar)
+
+        self.bind_all("<Control-o>", lambda _: self._load_config())
+        self.bind_all("<Control-s>", lambda _: self._save_config())
+        self.bind_all("<Control-S>", lambda _: self._save_config_as())
+
+    # ------------------------------------------------------------------
+    # State serialisation
+    # ------------------------------------------------------------------
+
+    def get_state(self) -> dict:
+        return {
+            "files":    self._files_tab.get_state(),
+            "analysis": self._analysis_tab.get_state(),
+            "output":   self._output_tab.get_state(),
+        }
+
+    def set_state(self, state: dict) -> None:
+        self._files_tab.set_state(state.get("files", {}))
+        self._analysis_tab.set_state(state.get("analysis", {}))
+        self._output_tab.set_state(state.get("output", {}))
+
+    # ------------------------------------------------------------------
+    # Load / save actions
+    # ------------------------------------------------------------------
+
+    def _load_config(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Load config",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            state = json.loads(Path(path).read_text(encoding="utf-8"))
+            self.set_state(state)
+            self._current_config_path = Path(path)
+            self.title(f"Log Master — {Path(path).name}")
+        except Exception as exc:
+            messagebox.showerror("Load failed", str(exc))
+
+    def _save_config(self) -> None:
+        if self._current_config_path:
+            self._write_config(self._current_config_path)
+        else:
+            self._save_config_as()
+
+    def _save_config_as(self) -> None:
+        raw = filedialog.asksaveasfilename(
+            title="Save config as",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        )
+        if not raw:
+            return
+        path = Path(raw)
+        if self._write_config(path):
+            self._current_config_path = path
+            self.title(f"Log Master — {path.name}")
+
+    def _write_config(self, path: Path) -> bool:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(self.get_state(), indent=2),
+                encoding="utf-8",
+            )
+            return True
+        except Exception as exc:
+            messagebox.showerror("Save failed", str(exc))
+            return False
+
+    # ------------------------------------------------------------------
+    # Auto-save / auto-load
+    # ------------------------------------------------------------------
+
+    def _load_autosave(self) -> None:
+        if _AUTOSAVE_PATH.exists():
+            try:
+                state = json.loads(_AUTOSAVE_PATH.read_text(encoding="utf-8"))
+                self.set_state(state)
+            except Exception:
+                pass  # corrupt autosave — start fresh
+
+    def _on_close(self) -> None:
+        try:
+            _AUTOSAVE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            _AUTOSAVE_PATH.write_text(
+                json.dumps(self.get_state(), indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+        self.destroy()
+
+    # ------------------------------------------------------------------
+    # Pipeline config builder
+    # ------------------------------------------------------------------
 
     def _build_config(self) -> ProcessorConfig:
         roots = self._files_tab.roots()

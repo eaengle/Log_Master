@@ -123,28 +123,54 @@ Modes are combinable — specify `--mode` multiple times to produce multiple out
 
 ## JSON Config File
 
-All CLI options can be specified in a JSON file:
+The GUI (File > Save Config) and the CLI share the same JSON format, so a
+config file can be created in either tool and used by both.
 
 ```json
 {
-  "root": ["C:\\logs\\app", "C:\\logs\\system"],
-  "ext": [".log"],
-  "depth": 5,
-  "include": ["ERROR", "FATAL", "Exception"],
-  "exclude": ["health.check"],
-  "skip_file": ["debug"],
-  "from": "2025-01-01",
-  "to": "2025-01-31T23:59:59",
-  "case_insensitive": false,
-  "context": 2,
-  "output_dir": "C:\\results",
-  "mode": ["single", "per-pattern"],
-  "sort": "timestamp",
-  "workers": 4
+  "files": {
+    "roots": ["C:\\logs\\app", "C:\\logs\\system"],
+    "extensions": ".log",
+    "globs": "",
+    "max_depth": "5",
+    "min_size": "",
+    "max_size": "",
+    "modified_after": "2025-01-01",
+    "modified_before": "",
+    "include_dirs": "",
+    "exclude_dirs": ""
+  },
+  "analysis": {
+    "include_patterns": ["ERROR", "FATAL", "Exception"],
+    "exclude_patterns": ["health.check"],
+    "skip_file_patterns": ["debug"],
+    "time_from": "2025-01-01",
+    "time_to": "2025-01-31T23:59:59",
+    "case_insensitive": false,
+    "context_lines": "2"
+  },
+  "output": {
+    "output_dir": "C:\\results",
+    "mode_single": true,
+    "mode_pattern": true,
+    "mode_source": false,
+    "mode_parent": false,
+    "sort": "timestamp",
+    "columns": {
+      "timestamp": true,
+      "source_file": true,
+      "line_no": true,
+      "pattern": true,
+      "text": true
+    },
+    "include_context": true,
+    "workers": "4",
+    "base_path": ""
+  }
 }
 ```
 
-Any flag supplied on the command line overrides the corresponding JSON value.
+Any CLI flag supplied on the command line overrides the corresponding JSON value.
 
 ## Supported Timestamp Formats
 

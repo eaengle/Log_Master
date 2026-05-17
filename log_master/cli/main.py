@@ -4,6 +4,10 @@ Command-line interface for Log Master.
 Configuration is layered: a JSON config file provides the base; any flag
 supplied on the command line overrides the corresponding JSON field.
 
+The JSON config format is the same format saved by the GUI (File > Save Config),
+so a config file can be created in either the GUI or a text editor and used by
+both tools interchangeably.
+
 Usage examples:
 
     logmaster --root /var/log --include ERROR --output-dir ./out
@@ -221,7 +225,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 # ---------------------------------------------------------------------------
-# Config merging
+# Config helpers
 # ---------------------------------------------------------------------------
 
 
@@ -234,36 +238,62 @@ def _parse_datetime(value: str, field: str) -> datetime:
     raise SystemExit(f"error: {field} '{value}' is not YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS")
 
 
-def _resolve(cli_val, json_cfg: dict, key: str, default):
-    """Return CLI value if provided, else JSON value, else default."""
-    if cli_val is not None:
-        return cli_val
-    return json_cfg.get(key, default)
+def _csv(s: str) -> list[str]:
+    """Split a comma-separated string, filtering blank tokens."""
+    return [v.strip() for v in s.split(",") if v.strip()]
 
 
-def _resolve_list(cli_list, json_cfg: dict, key: str) -> list:
-    """Return CLI list if provided (non-None), else JSON list, else []."""
-    if cli_list is not None:
-        return cli_list
-    return json_cfg.get(key, [])
+def _opt_int(val) -> int | None:
+    """Parse an optional int from a string or number; return None for blank/None."""
+    if val is None or val == "":
+        return None
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Config builder — merges GUI-format JSON with CLI overrides
+# ---------------------------------------------------------------------------
 
 
 def _build_processor_config(args: argparse.Namespace, json_cfg: dict) -> ProcessorConfig:
+    f = json_cfg.get("files", {})
+    a = json_cfg.get("analysis", {})
+    o = json_cfg.get("output", {})
+
     # --- File discovery ---
-    roots = _resolve_list(args.root, json_cfg, "root")
+    roots = args.root if args.root is not None else f.get("roots", [])
     if not roots:
         raise SystemExit("error: at least one --root directory is required")
 
-    modified_after_raw = _resolve(args.modified_after, json_cfg, "modified_after", None)
-    modified_before_raw = _resolve(args.modified_before, json_cfg, "modified_before", None)
+    # globs / extensions / dir-filters are stored in the JSON as comma-separated
+    # strings (matching the GUI text fields), so split them here.
+    def _json_csv(section: dict, key: str) -> list[str]:
+        val = section.get(key, "")
+        return _csv(val) if isinstance(val, str) else list(val)
+
+    name_globs      = args.glob       if args.glob       is not None else _json_csv(f, "globs")
+    extensions      = args.ext        if args.ext        is not None else _json_csv(f, "extensions")
+    include_dirs    = args.include_dir if args.include_dir is not None else _json_csv(f, "include_dirs")
+    exclude_dirs    = args.exclude_dir if args.exclude_dir is not None else _json_csv(f, "exclude_dirs")
+    max_depth       = args.depth    if args.depth    is not None else _opt_int(f.get("max_depth"))
+    min_size        = args.min_size if args.min_size is not None else _opt_int(f.get("min_size"))
+    max_size        = args.max_size if args.max_size is not None else _opt_int(f.get("max_size"))
+
+    modified_after_raw  = (args.modified_after  if args.modified_after  is not None
+                           else f.get("modified_after",  "").strip() or None)
+    modified_before_raw = (args.modified_before if args.modified_before is not None
+                           else f.get("modified_before", "").strip() or None)
 
     find_criteria = FileFindCriteria(
         root_dirs=tuple(Path(r) for r in roots),
-        name_globs=tuple(_resolve_list(args.glob, json_cfg, "glob")),
-        extensions=tuple(_resolve_list(args.ext, json_cfg, "ext")),
-        max_depth=_resolve(args.depth, json_cfg, "depth", None),
-        min_size_bytes=_resolve(args.min_size, json_cfg, "min_size", None),
-        max_size_bytes=_resolve(args.max_size, json_cfg, "max_size", None),
+        name_globs=tuple(name_globs),
+        extensions=tuple(extensions),
+        max_depth=max_depth,
+        min_size_bytes=min_size,
+        max_size_bytes=max_size,
         modified_after=(
             _parse_datetime(modified_after_raw, "--modified-after")
             if modified_after_raw else None
@@ -272,67 +302,95 @@ def _build_processor_config(args: argparse.Namespace, json_cfg: dict) -> Process
             _parse_datetime(modified_before_raw, "--modified-before")
             if modified_before_raw else None
         ),
-        include_dir_globs=tuple(_resolve_list(args.include_dir, json_cfg, "include_dir")),
-        exclude_dir_globs=tuple(_resolve_list(args.exclude_dir, json_cfg, "exclude_dir")),
+        include_dir_globs=tuple(include_dirs),
+        exclude_dir_globs=tuple(exclude_dirs),
     )
 
     # --- Search ---
-    time_from_raw = _resolve(args.time_from, json_cfg, "from", None)
-    time_to_raw = _resolve(args.time_to, json_cfg, "to", None)
-    case_insensitive = _resolve(args.case_insensitive, json_cfg, "case_insensitive", False)
+    include_patterns    = args.include   if args.include   is not None else a.get("include_patterns",   [])
+    exclude_patterns    = args.exclude   if args.exclude   is not None else a.get("exclude_patterns",   [])
+    skip_file_patterns  = args.skip_file if args.skip_file is not None else a.get("skip_file_patterns", [])
+
+    time_from_raw = (args.time_from if args.time_from is not None
+                     else a.get("time_from", "").strip() or None)
+    time_to_raw   = (args.time_to   if args.time_to   is not None
+                     else a.get("time_to",   "").strip() or None)
+
+    case_insensitive = args.case_insensitive if args.case_insensitive else a.get("case_insensitive", False)
+    context_lines    = args.context if args.context is not None else _opt_int(a.get("context_lines", "0")) or 0
 
     search_config = SearchConfig(
-        include_patterns=tuple(_resolve_list(args.include, json_cfg, "include")),
-        exclude_patterns=tuple(_resolve_list(args.exclude, json_cfg, "exclude")),
-        skip_file_patterns=tuple(_resolve_list(args.skip_file, json_cfg, "skip_file")),
+        include_patterns=tuple(include_patterns),
+        exclude_patterns=tuple(exclude_patterns),
+        skip_file_patterns=tuple(skip_file_patterns),
         time_from=_parse_datetime(time_from_raw, "--from") if time_from_raw else None,
-        time_to=_parse_datetime(time_to_raw, "--to") if time_to_raw else None,
+        time_to=_parse_datetime(time_to_raw, "--to")       if time_to_raw   else None,
         case_sensitive=not case_insensitive,
-        context_lines=_resolve(args.context, json_cfg, "context", 0),
+        context_lines=context_lines,
     )
 
     # --- Output ---
-    output_dir_raw = _resolve(args.output_dir, json_cfg, "output_dir", None)
+    output_dir_raw = (args.output_dir if args.output_dir is not None
+                      else o.get("output_dir", "").strip() or None)
     if not output_dir_raw:
         raise SystemExit("error: --output-dir is required")
 
-    modes_raw = _resolve_list(args.mode, json_cfg, "mode") or ["single"]
+    # Modes: CLI --mode list overrides; JSON stores per-mode booleans.
     mode_map = {
-        "single": OutputMode.SINGLE,
+        "single":      OutputMode.SINGLE,
         "per-pattern": OutputMode.PER_PATTERN,
-        "per-source": OutputMode.PER_SOURCE_FILE,
-        "per-parent": OutputMode.PER_PARENT_DIR,
+        "per-source":  OutputMode.PER_SOURCE_FILE,
+        "per-parent":  OutputMode.PER_PARENT_DIR,
     }
-    modes = frozenset(mode_map[m] for m in modes_raw)
+    if args.mode is not None:
+        modes_list = args.mode
+    else:
+        modes_list = [
+            name for name, flag_key in [
+                ("single",      "mode_single"),
+                ("per-pattern", "mode_pattern"),
+                ("per-source",  "mode_source"),
+                ("per-parent",  "mode_parent"),
+            ]
+            if o.get(flag_key, name == "single")
+        ]
+    modes = frozenset(mode_map[m] for m in (modes_list or ["single"]))
 
-    columns_raw = _resolve(args.columns, json_cfg, "columns", None)
-    if columns_raw:
-        col_map = {c.value: c for c in Column}
+    # Columns: CLI --columns string overrides; JSON stores a {name: bool} dict.
+    col_map = {c.value: c for c in Column}
+    if args.columns is not None:
         columns = tuple(
             col_map[name.strip()]
-            for name in columns_raw.split(",")
+            for name in args.columns.split(",")
             if name.strip() in col_map
         )
     else:
+        json_cols = o.get("columns", {})
+        columns = tuple(
+            col for name, col in col_map.items()
+            if json_cols.get(name, True)
+        ) if json_cols else tuple(Column)
+    if not columns:
         columns = tuple(Column)
 
-    sort_raw = _resolve(args.sort, json_cfg, "sort", "file-order")
+    sort_raw = args.sort if args.sort is not None else o.get("sort", "file-order")
     sort = SortOrder.TIMESTAMP if sort_raw == "timestamp" else SortOrder.FILE_ORDER
 
-    no_context = _resolve(args.no_context, json_cfg, "no_context", False)
+    include_context = (not args.no_context) if args.no_context else o.get("include_context", True)
 
-    base_path_raw = _resolve(args.base_path, json_cfg, "base_path", None)
+    base_path_raw = (args.base_path if args.base_path is not None
+                     else o.get("base_path", "").strip() or None)
 
     output_config = OutputConfig(
         output_dir=Path(output_dir_raw),
         modes=modes,
         columns=columns,
         sort=sort,
-        include_context=not no_context,
+        include_context=include_context,
         base_path=Path(base_path_raw) if base_path_raw else None,
     )
 
-    workers = _resolve(args.workers, json_cfg, "workers", 1)
+    workers = args.workers if args.workers is not None else _opt_int(o.get("workers", "1")) or 1
 
     return ProcessorConfig(
         find_criteria=find_criteria,

@@ -142,7 +142,10 @@ class TestJsonConfig:
         root = tmp_path / "logs"
         write_log(root / "app.log", ["2024-01-01 09:00:00 INFO hello"])
         out = tmp_path / "out"
-        cfg = {"root": [str(root)], "output_dir": str(out)}
+        cfg = {
+            "files":  {"roots": [str(root)]},
+            "output": {"output_dir": str(out)},
+        }
         cfg_file = tmp_path / "cfg.json"
         cfg_file.write_text(json.dumps(cfg), encoding="utf-8")
         run(["--config", str(cfg_file)])
@@ -155,7 +158,11 @@ class TestJsonConfig:
             "2024-01-01 09:00:01 INFO ok",
         ])
         out = tmp_path / "out"
-        cfg = {"root": [str(root)], "output_dir": str(out), "include": ["ERROR"]}
+        cfg = {
+            "files":    {"roots": [str(root)]},
+            "analysis": {"include_patterns": ["ERROR"]},
+            "output":   {"output_dir": str(out)},
+        }
         cfg_file = tmp_path / "cfg.json"
         cfg_file.write_text(json.dumps(cfg), encoding="utf-8")
         run(["--config", str(cfg_file)])
@@ -169,10 +176,14 @@ class TestJsonConfig:
             "2024-01-01 09:00:01 WARN slow",
         ])
         out = tmp_path / "out"
-        cfg = {"root": [str(root)], "output_dir": str(out), "include": ["ERROR"]}
+        cfg = {
+            "files":    {"roots": [str(root)]},
+            "analysis": {"include_patterns": ["ERROR"]},
+            "output":   {"output_dir": str(out)},
+        }
         cfg_file = tmp_path / "cfg.json"
         cfg_file.write_text(json.dumps(cfg), encoding="utf-8")
-        # CLI --include overrides JSON include
+        # CLI --include overrides JSON include_patterns
         run(["--config", str(cfg_file), "--include", "WARN"])
         rows = read_tsv(out / "results.tsv")
         assert len(rows) == 1
@@ -183,7 +194,10 @@ class TestJsonConfig:
         write_log(root / "app.log", ["2024-01-01 09:00:00 INFO hi"])
         json_out = tmp_path / "json_out"
         cli_out = tmp_path / "cli_out"
-        cfg = {"root": [str(root)], "output_dir": str(json_out)}
+        cfg = {
+            "files":  {"roots": [str(root)]},
+            "output": {"output_dir": str(json_out)},
+        }
         cfg_file = tmp_path / "cfg.json"
         cfg_file.write_text(json.dumps(cfg), encoding="utf-8")
         run(["--config", str(cfg_file), "--output-dir", str(cli_out)])
@@ -196,7 +210,10 @@ class TestJsonConfig:
             write_log(root / f"{i}.log",
                       [f"2024-01-01 09:00:0{i} INFO line{i}"])
         out = tmp_path / "out"
-        cfg = {"root": [str(root)], "output_dir": str(out), "workers": 2}
+        cfg = {
+            "files":  {"roots": [str(root)]},
+            "output": {"output_dir": str(out), "workers": "2"},
+        }
         cfg_file = tmp_path / "cfg.json"
         cfg_file.write_text(json.dumps(cfg), encoding="utf-8")
         run(["--config", str(cfg_file)])
