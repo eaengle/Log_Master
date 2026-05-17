@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "log-master"
+version = "0.1.0"
+description = "Multi-format log file analysis tool"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+]
+
+[project.scripts]
+logmaster = "log_master.cli.main:main"
+logmaster-gui = "log_master.gui.app:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["log_master*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/test_file_finder.py -v)",
+      "Bash(python -m pytest tests/test_timestamp_resolver.py -v)",
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Bash(cd /d \"d:\\\\source\\\\repos\\\\Log_Master\")",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(Test-Path \"d:/source/repos/Log_Master/log_master/core/log_processor.py\")",
+      "Bash(python -m pytest tests/test_cli.py -v --tb=short)"
+    ]
+  }
+}

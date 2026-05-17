@@ -1,0 +1,8 @@
+15/Mar/2024:07:59:50 +0000 kernel: system boot sequence complete
+15/Mar/2024:08:00:00 +0000 systemd: Starting application service...
+15/Mar/2024:08:00:02 +0000 systemd: application service started (pid=1234)
+15/Mar/2024:08:30:15 +0000 kernel: disk I/O wait high on /dev/sda1 iowait=78%
+15/Mar/2024:09:45:30 +0000 kernel: TCP retransmit flood detected src=10.0.0.5
+15/Mar/2024:10:00:00 +0000 systemd: Stopping application service (maintenance)
+15/Mar/2024:10:30:00 +0000 systemd: Starting application service...
+15/Mar/2024:10:30:02 +0000 systemd: application service started (pid=2001)

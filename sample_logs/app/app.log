@@ -1,0 +1,15 @@
+2024-03-15 08:00:01,023 INFO  [main] Application starting up
+2024-03-15 08:00:01,145 INFO  [main] Loading configuration from /etc/app/config.yaml
+2024-03-15 08:00:01,302 INFO  [db] Connecting to database host=db01 port=5432
+2024-03-15 08:00:01,890 INFO  [db] Database connection established
+2024-03-15 08:00:02,001 INFO  [main] Server listening on 0.0.0.0:8080
+2024-03-15 08:15:44,210 WARN  [auth] Failed login attempt user=jsmith ip=10.0.0.5
+2024-03-15 08:15:45,320 WARN  [auth] Failed login attempt user=jsmith ip=10.0.0.5
+2024-03-15 08:15:46,430 ERROR [auth] Account locked after 3 failures user=jsmith
+2024-03-15 09:02:11,005 INFO  [api] GET /health status=200 latency=3ms
+2024-03-15 09:45:33,700 ERROR [db] Query timeout after 30s query=SELECT * FROM events
+2024-03-15 09:45:33,705 ERROR [db] Retrying query attempt=2
+2024-03-15 09:45:35,910 ERROR [db] Retrying query attempt=3
+2024-03-15 09:45:36,000 FATAL [db] Max retries exceeded, aborting request
+2024-03-15 10:00:00,000 INFO  [main] Scheduled maintenance window starting
+2024-03-15 10:30:00,000 INFO  [main] Maintenance complete, resuming normal operation

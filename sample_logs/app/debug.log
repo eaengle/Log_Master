@@ -1,0 +1,8 @@
+Mar 15 08:00:01 myhost app[1234]: DEBUG startup sequence initiated
+Mar 15 08:00:01 myhost app[1234]: DEBUG config key=db.host value=db01
+Mar 15 08:00:01 myhost app[1234]: DEBUG config key=db.port value=5432
+Mar 15 08:00:02 myhost app[1234]: DEBUG thread pool size=8 queue=100
+Mar 15 08:15:44 myhost app[1234]: DEBUG auth attempt token=<redacted> user=jsmith
+Mar 15 09:45:33 myhost app[1234]: DEBUG executing query id=7f3a9c SELECT * FROM events
+Mar 15 09:45:33 myhost app[1234]: DEBUG query planner chose seq_scan table=events rows=2400000
+Mar 15 10:00:00 myhost app[1234]: DEBUG maintenance hook triggered
