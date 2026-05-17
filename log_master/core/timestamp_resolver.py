@@ -416,7 +416,8 @@ _FORMATS: list[_Format] = [
     _Format(
         "android",
         re.compile(
-            r"(?<!\d)(?P<month>0[1-9]|1[0-2])-(?P<day>0[1-9]|[12]\d|3[01]) "
+            r"(?<!\d)(?P<month>0[1-9]|1[0-2])-(?P<day>0[1-9]|[12]\d|3[01])"
+            r"[ ,]"
             r"(?P<hour>\d{2}):(?P<minute>\d{2}):(?P<second>\d{2})"
             r"\.(?P<frac>\d+)"
         ),

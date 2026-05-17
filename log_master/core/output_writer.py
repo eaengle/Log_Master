@@ -39,6 +39,20 @@ from typing import IO
 from .expression_analyzer import MatchResult
 
 
+@dataclass(frozen=True)
+class _BufferedRow:
+    """One concrete output row waiting for timestamp-sorted flush."""
+
+    timestamp: datetime
+    sequence: int
+    dest: Path
+    text: str
+    source_file: Path
+    line_no: int
+    timestamp_str: str
+    pattern_str: str
+
+
 # ---------------------------------------------------------------------------
 # Enums and config
 # ---------------------------------------------------------------------------
@@ -119,6 +133,7 @@ class OutputWriter:
         self._buffer: list[MatchResult] | None = (
             [] if config.sort == SortOrder.TIMESTAMP else None
         )
+        self._row_sequence = 0
 
         # Collision avoidance for per-source-file filenames
         self._stem_counts: dict[str, int] = defaultdict(int)
@@ -154,8 +169,19 @@ class OutputWriter:
         Always closes all open file handles.
         """
         if self._buffer is not None:
-            for result in sorted(self._buffer, key=lambda r: r.timestamp):
-                self._route(result)
+            rows: list[_BufferedRow] = []
+            for result in self._buffer:
+                rows.extend(self._rows_for_result(result))
+            for row in sorted(rows, key=lambda r: (r.timestamp, r.sequence)):
+                writer = self._get_writer(row.dest)
+                self._write_row(
+                    writer,
+                    row.text,
+                    row.source_file,
+                    row.line_no,
+                    timestamp_str=row.timestamp_str,
+                    pattern_str=row.pattern_str,
+                )
         for fh in self._handles.values():
             fh.close()
         self._handles.clear()
@@ -191,6 +217,89 @@ class OutputWriter:
                     result,
                     pattern_col=" | ".join(sorted(result.matched_patterns)),
                 )
+
+    def _rows_for_result(self, result: MatchResult) -> list[_BufferedRow]:
+        """Return concrete destination rows for timestamp-sorted output."""
+        rows: list[_BufferedRow] = []
+        for mode in self._config.modes:
+            if mode == OutputMode.PER_PATTERN:
+                patterns = sorted(result.matched_patterns) if result.matched_patterns else ["_all"]
+                for pat in patterns:
+                    rows.extend(
+                        self._make_rows(self._dest_per_pattern(pat), result, pat)
+                    )
+            elif mode == OutputMode.SINGLE:
+                rows.extend(
+                    self._make_rows(
+                        self._config.output_dir / "results.tsv",
+                        result,
+                        " | ".join(sorted(result.matched_patterns)),
+                    )
+                )
+            elif mode == OutputMode.PER_SOURCE_FILE:
+                rows.extend(
+                    self._make_rows(
+                        self._dest_per_source(result.source_file),
+                        result,
+                        " | ".join(sorted(result.matched_patterns)),
+                    )
+                )
+            elif mode == OutputMode.PER_PARENT_DIR:
+                rows.extend(
+                    self._make_rows(
+                        self._dest_per_parent(result.source_file),
+                        result,
+                        " | ".join(sorted(result.matched_patterns)),
+                    )
+                )
+        return rows
+
+    def _make_rows(
+        self,
+        dest: Path,
+        result: MatchResult,
+        pattern_col: str,
+    ) -> list[_BufferedRow]:
+        """Build buffered rows for one destination."""
+        rows: list[_BufferedRow] = []
+        cfg = self._config
+
+        if cfg.include_context:
+            for ctx in result.context_before:
+                rows.append(self._buffered_row(dest, result.source_file, ctx.line_no,
+                                               ctx.timestamp, ctx.text, ""))
+
+        rows.append(self._buffered_row(dest, result.source_file, result.line_no,
+                                       result.timestamp, result.text, pattern_col))
+
+        if cfg.include_context:
+            for ctx in result.context_after:
+                rows.append(self._buffered_row(dest, result.source_file, ctx.line_no,
+                                               ctx.timestamp, ctx.text, ""))
+
+        return rows
+
+    def _buffered_row(
+        self,
+        dest: Path,
+        source_file: Path,
+        line_no: int,
+        timestamp: datetime,
+        text: str,
+        pattern_str: str,
+    ) -> _BufferedRow:
+        row = _BufferedRow(
+            timestamp=timestamp,
+            sequence=self._row_sequence,
+            dest=dest,
+            text=text,
+            source_file=source_file,
+            line_no=line_no,
+            timestamp_str=timestamp.isoformat(timespec="milliseconds"),
+            pattern_str=pattern_str,
+        )
+        self._row_sequence += 1
+        return row
 
     def _emit(self, dest: Path, result: MatchResult, pattern_col: str) -> None:
         """Write context_before, the match row, and context_after to *dest*."""

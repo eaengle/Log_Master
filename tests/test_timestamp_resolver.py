@@ -968,6 +968,13 @@ class TestAndroid:
         ]
         assert resolver.detect_format_name(lines) == "android"
 
+    def test_detected_from_structured_csv_row(self):
+        lines = [
+            "1,03-17,16:13:38.811,1702,2395,D,WindowManager,layoutWindowLw",
+            "2,03-17,16:13:38.819,1702,8671,D,PowerManagerService,release",
+        ]
+        assert resolver.detect_format_name(lines) == "android"
+
     def test_parsed_datetime_uses_mtime_year(self, tmp_path):
         mtime = datetime(2024, 6, 1)
         fi = write_log(tmp_path / "android.log", [
@@ -976,6 +983,18 @@ class TestAndroid:
         pl = list(resolver.iter_parsed_lines(fi))[0]
         assert pl.timestamp.year == 2024
         assert pl.timestamp == datetime(2024, 3, 17, 16, 13, 38, 811000)
+
+    def test_structured_csv_datetime_uses_mtime_year(self, tmp_path):
+        mtime = datetime(2024, 6, 1)
+        fi = write_log(tmp_path / "android.csv", [
+            "LineId,Date,Time,Pid,Tid,Level,Component,Content",
+            "1,03-17,16:13:38.811,1702,2395,D,WindowManager,layoutWindowLw",
+        ], mtime)
+        lines = list(resolver.iter_parsed_lines(fi))
+        assert lines[1].timestamp == datetime(2024, 3, 17, 16, 13, 38, 811000)
+        assert "03-17" not in lines[1].text
+        assert "16:13:38.811" not in lines[1].text
+        assert "WindowManager" in lines[1].text
 
     def test_year_rollover(self, tmp_path):
         # File mtime in January; log month is December → prior year

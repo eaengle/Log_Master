@@ -24,6 +24,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+from log_master.core.config import build_processor_config
 from log_master.core.expression_analyzer import SearchConfig
 from log_master.core.file_finder import FileFindCriteria
 from log_master.core.log_processor import LogProcessor, ProcessorConfig, ProcessorResult
@@ -757,21 +758,10 @@ class App(tk.Tk):
     # ------------------------------------------------------------------
 
     def _build_config(self) -> ProcessorConfig:
-        roots = self._files_tab.roots()
-        if not roots:
-            raise ValueError("Add at least one root directory in the Files tab.")
-
-        find_criteria = self._files_tab.build_criteria()
-        search_config = self._analysis_tab.build_config()
-        output_config = self._output_tab.build_config()
-        workers = self._output_tab.workers()
-
-        return ProcessorConfig(
-            find_criteria=find_criteria,
-            search_config=search_config,
-            output_config=output_config,
-            workers=workers,
-        )
+        try:
+            return build_processor_config(self.get_state())
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------

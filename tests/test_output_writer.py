@@ -467,6 +467,41 @@ class TestSortOrder:
         texts = [r["text"] for r in rows]
         assert texts == ["b earlier", "a later", "a latest"]
 
+    def test_timestamp_sort_merges_context_rows_across_files(self, tmp_path):
+        src_a = tmp_path / "a.log"
+        src_b = tmp_path / "b.log"
+        ts = datetime(2024, 1, 1, 10, 0, 0)
+        results = [
+            make_result(
+                src_a,
+                line_no=2,
+                timestamp=ts + timedelta(seconds=3),
+                text="a match",
+                before=("a before",),
+                after=("a after",),
+            ),
+            make_result(
+                src_b,
+                line_no=2,
+                timestamp=ts + timedelta(seconds=3, milliseconds=50),
+                text="b match",
+                before=("b before",),
+                after=("b after",),
+            ),
+        ]
+        run_writer(results, tmp_path / "out", sort=SortOrder.TIMESTAMP)
+        rows = read_tsv(tmp_path / "out" / "results.tsv")
+        assert [r["text"] for r in rows] == [
+            "a before",
+            "b before",
+            "a match",
+            "b match",
+            "a after",
+            "b after",
+        ]
+        timestamps = [r["timestamp"] for r in rows]
+        assert timestamps == sorted(timestamps)
+
 
 # ---------------------------------------------------------------------------
 # Context-manager and resource cleanup
