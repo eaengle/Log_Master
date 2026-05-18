@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import IO
 
 from .expression_analyzer import MatchResult
+from .file_finder import FileInfo
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,8 @@ class OutputConfig:
     sort: SortOrder = SortOrder.FILE_ORDER
     include_context: bool = True
     path_depth: int | None = None
+    root_dirs: tuple[Path, ...] = ()
+    include_patterns: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +165,101 @@ class OutputWriter:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def prepare(self, files: list[FileInfo]) -> None:
+        """
+        Pre-compute per-source destination paths using a global uniqueness algorithm.
+
+        Must be called before add_result() when PER_SOURCE_FILE mode is active.
+        The algorithm progressively adds parent directory components to each
+        candidate name until all names are unique.  Files that still conflict
+        after exhausting their relative path parts (identical relative paths from
+        different roots) receive a ``root_{N}_`` prefix using the deterministic
+        index from OutputConfig.root_dirs.
+        """
+        if OutputMode.PER_SOURCE_FILE not in self._config.modes:
+            return
+
+        # Build root index: config-supplied list is authoritative; fall back to
+        # the order roots are first seen in the files list.
+        root_dirs = self._config.root_dirs
+        if not root_dirs:
+            seen_set: set[Path] = set()
+            seen_list: list[Path] = []
+            for fi in files:
+                if fi.root not in seen_set:
+                    seen_set.add(fi.root)
+                    seen_list.append(fi.root)
+            root_dirs = tuple(seen_list)
+        root_index: dict[Path, int] = {r: i for i, r in enumerate(root_dirs)}
+
+        # Deduplicate by path (a file may appear multiple times if globs overlap)
+        seen_paths: set[Path] = set()
+        unique_fis: list[FileInfo] = []
+        for fi in files:
+            if fi.path not in seen_paths:
+                seen_paths.add(fi.path)
+                unique_fis.append(fi)
+
+        if not unique_fis:
+            return
+
+        fi_map: dict[Path, FileInfo] = {fi.path: fi for fi in unique_fis}
+
+        # Relative path parts for each file (e.g. ["subdir", "app.log"])
+        rel_parts: dict[Path, list[str]] = {}
+        for fi in unique_fis:
+            try:
+                parts = list(fi.path.relative_to(fi.root).parts)
+            except ValueError:
+                parts = [fi.path.name]
+            rel_parts[fi.path] = parts
+
+        def _candidate(path: Path, depth: int) -> str | None:
+            """Candidate name using ``depth`` parent dirs + stem. None if exhausted."""
+            parts = rel_parts[path]
+            n = len(parts)
+            if depth >= n:
+                return None
+            taken = parts[n - 1 - depth:]
+            stem = Path(taken[-1]).stem
+            return "_".join([*taken[:-1], stem]) if len(taken) > 1 else stem
+
+        # Start every file at depth 0 (stem only) and widen until no conflicts
+        depths: dict[Path, int] = {fi.path: 0 for fi in unique_fis}
+        changed = True
+        while changed:
+            changed = False
+            name_to_paths: dict[str, list[Path]] = defaultdict(list)
+            for path, depth in depths.items():
+                name = _candidate(path, depth)
+                if name is not None:
+                    name_to_paths[name].append(path)
+
+            for paths in name_to_paths.values():
+                if len(paths) > 1:
+                    for path in paths:
+                        if _candidate(path, depths[path] + 1) is not None:
+                            depths[path] += 1
+                            changed = True
+
+        # Collect final names; files still sharing a name get a root-index prefix
+        final_name: dict[str, list[Path]] = defaultdict(list)
+        for path, depth in depths.items():
+            name = _candidate(path, depth) or Path(rel_parts[path][-1]).stem
+            final_name[name].append(path)
+
+        assignments: dict[Path, str] = {}
+        for name, paths in final_name.items():
+            if len(paths) == 1:
+                assignments[paths[0]] = name
+            else:
+                for path in paths:
+                    root_idx = root_index.get(fi_map[path].root, 0)
+                    assignments[path] = f"root_{root_idx}_{name}"
+
+        for path, name in assignments.items():
+            self._source_to_dest[path] = self._config.output_dir / f"{name}.tsv"
 
     def add_result(self, result: MatchResult) -> None:
         """
@@ -368,7 +466,14 @@ class OutputWriter:
     # ------------------------------------------------------------------
 
     def _dest_per_pattern(self, pattern: str) -> Path:
-        safe = _re.sub(r"[^\w\-]", "_", pattern)[:64]
+        safe = _re.sub(r"[^\w\-]", "_", pattern)[:32]
+        patterns = self._config.include_patterns
+        if patterns:
+            try:
+                idx = patterns.index(pattern)
+                return self._config.output_dir / f"pattern_{idx}_{safe}.tsv"
+            except ValueError:
+                pass  # sentinel like "_all" is not in the configured list
         return self._config.output_dir / f"pattern_{safe}.tsv"
 
     def _dest_per_source(self, source: Path) -> Path:

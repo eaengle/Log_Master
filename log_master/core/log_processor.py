@@ -108,6 +108,7 @@ class LogProcessor:
         workers = self._resolve_workers()
 
         with OutputWriter(cfg.output_config) as writer:
+            writer.prepare(files)
             iterator = (
                 self._run_serial(files, analyzer, resolver)
                 if workers == 1

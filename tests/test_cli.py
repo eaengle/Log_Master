@@ -348,7 +348,7 @@ class TestOutputFlags:
         out = tmp_path / "out"
         run(["--root", str(root), "--output-dir", str(out),
              "--include", "ERROR", "--mode", "per-pattern"])
-        assert (out / "pattern_ERROR.tsv").exists()
+        assert (out / "pattern_0_ERROR.tsv").exists()
 
     def test_mode_per_source(self, tmp_path):
         root = tmp_path / "logs"

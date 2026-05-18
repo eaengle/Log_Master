@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from log_master.core.expression_analyzer import MatchResult
+from log_master.core.file_finder import FileInfo
 from log_master.core.timestamp_resolver import ParsedLine
 from log_master.core.output_writer import (
     Column,
@@ -201,6 +202,47 @@ class TestPerPatternMode:
         assert "^" not in files[0].name
         assert "*" not in files[0].name
 
+    def test_indexed_naming_when_include_patterns_set(self, tmp_path):
+        """With include_patterns configured, files use pattern_{idx}_{hint}.tsv."""
+        src = tmp_path / "app.log"
+        results = [
+            make_result(src, text="ERROR bad", patterns={"ERROR"}),
+            make_result(src, text="WARN slow", patterns={"WARN"}),
+        ]
+        cfg = OutputConfig(
+            output_dir=tmp_path / "out",
+            modes=frozenset({OutputMode.PER_PATTERN}),
+            include_patterns=("ERROR", "WARN"),
+        )
+        with OutputWriter(cfg) as w:
+            for r in results:
+                w.add_result(r)
+        out = tmp_path / "out"
+        assert (out / "pattern_0_ERROR.tsv").exists()
+        assert (out / "pattern_1_WARN.tsv").exists()
+
+    def test_indexed_naming_guarantees_uniqueness_for_colliding_sanitized_names(self, tmp_path):
+        """Two patterns that sanitize to the same string still get distinct filenames."""
+        src = tmp_path / "app.log"
+        results = [
+            make_result(src, text="match", patterns={"ERR|OR"}),
+            make_result(src, text="match", patterns={"ERR.OR"}),
+        ]
+        cfg = OutputConfig(
+            output_dir=tmp_path / "out",
+            modes=frozenset({OutputMode.PER_PATTERN}),
+            include_patterns=("ERR|OR", "ERR.OR"),
+        )
+        with OutputWriter(cfg) as w:
+            for r in results:
+                w.add_result(r)
+        out = tmp_path / "out"
+        files = list(out.glob("pattern_*.tsv"))
+        assert len(files) == 2
+        names = {f.name for f in files}
+        assert "pattern_0_ERR_OR.tsv" in names
+        assert "pattern_1_ERR_OR.tsv" in names
+
 
 # ---------------------------------------------------------------------------
 # Per-source-file mode
@@ -236,15 +278,52 @@ class TestPerSourceFileMode:
         assert a_rows[0]["text"] == "msg from a"
         assert b_rows[0]["text"] == "msg from b"
 
-    def test_same_stem_collision_gets_suffix(self, tmp_path):
-        src_a = tmp_path / "logs" / "app.log"
-        src_b = tmp_path / "archive" / "app.log"
-        results = [make_result(src_a), make_result(src_b)]
-        run_writer(results, tmp_path / "out",
-                   modes=frozenset({OutputMode.PER_SOURCE_FILE}))
+    def test_same_stem_collision_uses_parent_dir(self, tmp_path):
+        """Files sharing a stem under the same root are disambiguated by parent dir name."""
+        root = tmp_path
+        src_a = root / "logs" / "app.log"
+        src_b = root / "archive" / "app.log"
+        files = [
+            FileInfo(path=src_a, root=root, size_bytes=0, mtime=datetime(2024, 1, 1)),
+            FileInfo(path=src_b, root=root, size_bytes=0, mtime=datetime(2024, 1, 1)),
+        ]
+        results = [make_result(src_a, root=root), make_result(src_b, root=root)]
+        cfg = OutputConfig(
+            output_dir=tmp_path / "out",
+            modes=frozenset({OutputMode.PER_SOURCE_FILE}),
+            root_dirs=(root,),
+        )
+        with OutputWriter(cfg) as w:
+            w.prepare(files)
+            for r in results:
+                w.add_result(r)
         out = tmp_path / "out"
-        assert (out / "app.tsv").exists()
-        assert (out / "app_1.tsv").exists()
+        assert (out / "logs_app.tsv").exists()
+        assert (out / "archive_app.tsv").exists()
+
+    def test_cross_root_collision_uses_root_index(self, tmp_path):
+        """Files with identical relative paths from different roots get a root_ prefix."""
+        root_a = tmp_path / "root_a"
+        root_b = tmp_path / "root_b"
+        src_a = root_a / "app.log"
+        src_b = root_b / "app.log"
+        files = [
+            FileInfo(path=src_a, root=root_a, size_bytes=0, mtime=datetime(2024, 1, 1)),
+            FileInfo(path=src_b, root=root_b, size_bytes=0, mtime=datetime(2024, 1, 1)),
+        ]
+        results = [make_result(src_a, root=root_a), make_result(src_b, root=root_b)]
+        cfg = OutputConfig(
+            output_dir=tmp_path / "out",
+            modes=frozenset({OutputMode.PER_SOURCE_FILE}),
+            root_dirs=(root_a, root_b),
+        )
+        with OutputWriter(cfg) as w:
+            w.prepare(files)
+            for r in results:
+                w.add_result(r)
+        out = tmp_path / "out"
+        assert (out / "root_0_app.tsv").exists()
+        assert (out / "root_1_app.tsv").exists()
 
 
 # ---------------------------------------------------------------------------

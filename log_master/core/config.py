@@ -209,6 +209,8 @@ def build_processor_config(
         sort=sort,
         include_context=include_context,
         path_depth=path_depth,
+        root_dirs=tuple(find_criteria.root_dirs),
+        include_patterns=search_config.include_patterns,
     )
 
     _v = _override(overrides, "workers")
