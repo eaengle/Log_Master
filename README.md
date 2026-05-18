@@ -123,6 +123,18 @@ Each output row is a TSV record with these columns:
 
 Modes are combinable — specify `--mode` multiple times to produce multiple output sets simultaneously.
 
+#### Per-pattern filenames
+
+Each output file is named `pattern_{N}_{hint}.tsv`, where `N` is the zero-based position of the pattern in the `--include` list and `hint` is a sanitized excerpt of the pattern. The index guarantees uniqueness even when two patterns sanitize to the same string (e.g. `ERR|OR` and `ERR.OR` both sanitize to `ERR_OR` but produce `pattern_0_ERR_OR.tsv` and `pattern_1_ERR_OR.tsv`).
+
+#### Per-source filenames
+
+Output filenames are determined before processing begins so that every file in a run gets a stable, collision-free name.
+
+1. **Start with the stem** — `app.log` → `app.tsv`.
+2. **Add parent directories until unique** — if two files share the same stem, parent directory components are prepended (joined with `_`) until all names are distinct. For example, `logs/app.log` and `archive/app.log` under the same root become `logs_app.tsv` and `archive_app.tsv`.
+3. **Root-index prefix for cross-root clashes** — if two files have identical relative paths from different root directories and cannot be distinguished by path components alone, a `root_{N}_` prefix is added using the deterministic index of each root in the `--root` list. For example, two roots both containing `app/server.log` produce `root_0_app_server.tsv` and `root_1_app_server.tsv`.
+
 ## JSON Config File
 
 The GUI (File > Save Config) and the CLI share the same JSON format, so a
