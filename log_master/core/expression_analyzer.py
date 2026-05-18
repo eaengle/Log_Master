@@ -63,12 +63,13 @@ class MatchResult:
     """One accepted line from one source file."""
 
     source_file: Path
+    root: Path                              # root_dir the file was discovered under
     line_no: int
     timestamp: datetime
     text: str
-    matched_patterns: frozenset[str]          # include pattern strings that triggered
-    context_before: tuple[ContextLine, ...]   # up to context_lines ParsedLines before
-    context_after: tuple[ContextLine, ...]    # up to context_lines ParsedLines after
+    matched_patterns: frozenset[str]        # include pattern strings that triggered
+    context_before: tuple[ContextLine, ...]  # up to context_lines ParsedLines before
+    context_after: tuple[ContextLine, ...]   # up to context_lines ParsedLines after
 
 
 class FileAnalysisResult(NamedTuple):
@@ -90,6 +91,7 @@ class _PendingMatch:
     """
 
     source_file: Path
+    root: Path
     line_no: int
     timestamp: datetime
     text: str
@@ -101,6 +103,7 @@ class _PendingMatch:
     def to_result(self) -> MatchResult:
         return MatchResult(
             source_file=self.source_file,
+            root=self.root,
             line_no=self.line_no,
             timestamp=self.timestamp,
             text=self.text,
@@ -186,6 +189,7 @@ class ExpressionAnalyzer:
             if matched is not None:
                 pending.append(_PendingMatch(
                     source_file=file_info.path,
+                    root=file_info.root,
                     line_no=pl.line_no,
                     timestamp=pl.timestamp,
                     text=pl.text,

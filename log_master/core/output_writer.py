@@ -13,6 +13,14 @@ Context lines (from MatchResult.context_before/after) appear as additional
 rows immediately surrounding the match row.  They carry the source_file and
 estimated line_no but have empty timestamp and pattern columns.
 
+source_file formatting:
+  Every file is written relative to the root_dir it was discovered under.
+  path_depth controls how many parent folders appear alongside the filename:
+    None  — full relative path (e.g. "nginx/web/access.log")
+    0     — filename only   (e.g. "access.log")
+    1     — one parent      (e.g. "web/access.log")
+    N     — N parents       (clamped to however many exist)
+
 Sort order:
   file-order  — rows written incrementally as add_result() is called.
   timestamp   — all results buffered, sorted by timestamp on flush().
@@ -47,7 +55,7 @@ class _BufferedRow:
     sequence: int
     dest: Path
     text: str
-    source_file: Path
+    fmt_source: str   # pre-formatted source_file string
     line_no: int
     timestamp_str: str
     pattern_str: str
@@ -92,12 +100,14 @@ class OutputConfig:
     """
     Immutable configuration for an OutputWriter.
 
-    output_dir   : directory where all output TSV files are created.
-    modes        : one or more routing modes (all active simultaneously).
-    columns      : which columns to include and their order.
-    sort         : file-order (incremental) or timestamp (buffered sort).
+    output_dir  : directory where all output TSV files are created.
+    modes       : one or more routing modes (all active simultaneously).
+    columns     : which columns to include and their order.
+    sort        : file-order (incremental) or timestamp (buffered sort).
     include_context : write context lines as additional rows around each match.
-    base_path    : if set, source_file paths are written relative to this root.
+    path_depth  : parent folders to include alongside the filename in
+                  source_file.  None = full path relative to root,
+                  0 = filename only, 1 = one parent + filename, etc.
     """
 
     output_dir: Path
@@ -107,7 +117,7 @@ class OutputConfig:
     columns: tuple[Column, ...] = DEFAULT_COLUMNS
     sort: SortOrder = SortOrder.FILE_ORDER
     include_context: bool = True
-    base_path: Path | None = None
+    path_depth: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +187,7 @@ class OutputWriter:
                 self._write_row(
                     writer,
                     row.text,
-                    row.source_file,
+                    row.fmt_source,
                     row.line_no,
                     timestamp_str=row.timestamp_str,
                     pattern_str=row.pattern_str,
@@ -263,18 +273,19 @@ class OutputWriter:
         """Build buffered rows for one destination."""
         rows: list[_BufferedRow] = []
         cfg = self._config
+        fmt_source = self._fmt_source(result.source_file, result.root)
 
         if cfg.include_context:
             for ctx in result.context_before:
-                rows.append(self._buffered_row(dest, result.source_file, ctx.line_no,
+                rows.append(self._buffered_row(dest, fmt_source, ctx.line_no,
                                                ctx.timestamp, ctx.text, ""))
 
-        rows.append(self._buffered_row(dest, result.source_file, result.line_no,
+        rows.append(self._buffered_row(dest, fmt_source, result.line_no,
                                        result.timestamp, result.text, pattern_col))
 
         if cfg.include_context:
             for ctx in result.context_after:
-                rows.append(self._buffered_row(dest, result.source_file, ctx.line_no,
+                rows.append(self._buffered_row(dest, fmt_source, ctx.line_no,
                                                ctx.timestamp, ctx.text, ""))
 
         return rows
@@ -282,7 +293,7 @@ class OutputWriter:
     def _buffered_row(
         self,
         dest: Path,
-        source_file: Path,
+        fmt_source: str,
         line_no: int,
         timestamp: datetime,
         text: str,
@@ -293,7 +304,7 @@ class OutputWriter:
             sequence=self._row_sequence,
             dest=dest,
             text=text,
-            source_file=source_file,
+            fmt_source=fmt_source,
             line_no=line_no,
             timestamp_str=timestamp.isoformat(timespec="milliseconds"),
             pattern_str=pattern_str,
@@ -305,27 +316,26 @@ class OutputWriter:
         """Write context_before, the match row, and context_after to *dest*."""
         writer = self._get_writer(dest)
         cfg = self._config
+        fmt_source = self._fmt_source(result.source_file, result.root)
 
         if cfg.include_context:
             for ctx in result.context_before:
                 self._write_row(
-                    writer, ctx.text, result.source_file,
-                    ctx.line_no,
+                    writer, ctx.text, fmt_source, ctx.line_no,
                     timestamp_str=ctx.timestamp.isoformat(timespec="milliseconds"),
                     pattern_str="",
                 )
 
         ts_str = result.timestamp.isoformat(timespec="milliseconds")
         self._write_row(
-            writer, result.text, result.source_file,
+            writer, result.text, fmt_source,
             result.line_no, timestamp_str=ts_str, pattern_str=pattern_col,
         )
 
         if cfg.include_context:
             for ctx in result.context_after:
                 self._write_row(
-                    writer, ctx.text, result.source_file,
-                    ctx.line_no,
+                    writer, ctx.text, fmt_source, ctx.line_no,
                     timestamp_str=ctx.timestamp.isoformat(timespec="milliseconds"),
                     pattern_str="",
                 )
@@ -334,7 +344,7 @@ class OutputWriter:
         self,
         writer: csv.writer,
         text: str,
-        source_file: Path,
+        fmt_source: str,
         line_no: int,
         timestamp_str: str,
         pattern_str: str,
@@ -344,7 +354,7 @@ class OutputWriter:
             if col == Column.TIMESTAMP:
                 row.append(timestamp_str)
             elif col == Column.SOURCE_FILE:
-                row.append(self._fmt_source(source_file))
+                row.append(fmt_source)
             elif col == Column.LINE_NO:
                 row.append(str(line_no))
             elif col == Column.PATTERN:
@@ -376,13 +386,25 @@ class OutputWriter:
         name = source.parent.name or "root"
         return self._config.output_dir / f"{name}.tsv"
 
-    def _fmt_source(self, source: Path) -> str:
-        if self._config.base_path is not None:
-            try:
-                return str(source.relative_to(self._config.base_path))
-            except ValueError:
-                pass
-        return str(source)
+    def _fmt_source(self, source: Path, root: Path) -> str:
+        """
+        Format *source* relative to *root*, then trim to path_depth parent
+        folders.  Falls back to the absolute path if relativisation fails.
+        """
+        try:
+            rel = source.relative_to(root)
+        except ValueError:
+            return str(source)
+
+        depth = self._config.path_depth
+        if depth is None:
+            return str(rel)
+
+        parts = rel.parts
+        keep = depth + 1  # depth parent folders + the filename itself
+        if len(parts) > keep:
+            return str(Path(*parts[-keep:]))
+        return str(rel)
 
     # ------------------------------------------------------------------
     # File-handle management

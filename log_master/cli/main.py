@@ -61,7 +61,7 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["file-order", "timestamp"],
     )
     out.add_argument("--no-context", action="store_true", default=None)
-    out.add_argument("--base-path", metavar="PATH", default=None)
+    out.add_argument("--path-depth", metavar="N", type=int, default=None)
 
     pipe = p.add_argument_group("pipeline")
     pipe.add_argument("--workers", "-w", metavar="N", type=int, default=None)

@@ -18,13 +18,13 @@ class ConfigError(ValueError):
 
 def parse_datetime(value: str, field: str) -> datetime:
     """Parse supported date/datetime strings."""
-    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d"):
         try:
             return datetime.strptime(value, fmt)
         except ValueError:
             pass
     raise ConfigError(
-        f"{field}: expected YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS, got '{value}'"
+        f"{field}: expected YYYY-MM-DD or YYYY-MM-DDTHH:MM[:SS], got '{value}'"
     )
 
 
@@ -72,53 +72,32 @@ def build_processor_config(
     if not roots:
         raise ConfigError("at least one root directory is required")
 
-    name_globs = (
-        _override(overrides, "glob")
-        if _override(overrides, "glob") is not None
-        else csv_list(files.get("globs", ""))
-    )
-    extensions = (
-        _override(overrides, "ext")
-        if _override(overrides, "ext") is not None
-        else csv_list(files.get("extensions", ""))
-    )
-    include_dirs = (
-        _override(overrides, "include_dir")
-        if _override(overrides, "include_dir") is not None
-        else csv_list(files.get("include_dirs", ""))
-    )
-    exclude_dirs = (
-        _override(overrides, "exclude_dir")
-        if _override(overrides, "exclude_dir") is not None
-        else csv_list(files.get("exclude_dirs", ""))
-    )
+    _v = _override(overrides, "glob")
+    name_globs = _v if _v is not None else csv_list(files.get("globs", ""))
 
-    max_depth = (
-        _override(overrides, "depth")
-        if _override(overrides, "depth") is not None
-        else optional_int(files.get("max_depth"), "Max depth")
-    )
-    min_size = (
-        _override(overrides, "min_size")
-        if _override(overrides, "min_size") is not None
-        else optional_int(files.get("min_size"), "Min size")
-    )
-    max_size = (
-        _override(overrides, "max_size")
-        if _override(overrides, "max_size") is not None
-        else optional_int(files.get("max_size"), "Max size")
-    )
+    _v = _override(overrides, "ext")
+    extensions = _v if _v is not None else csv_list(files.get("extensions", ""))
 
-    modified_after_raw = (
-        _override(overrides, "modified_after")
-        if _override(overrides, "modified_after") is not None
-        else str(files.get("modified_after", "")).strip() or None
-    )
-    modified_before_raw = (
-        _override(overrides, "modified_before")
-        if _override(overrides, "modified_before") is not None
-        else str(files.get("modified_before", "")).strip() or None
-    )
+    _v = _override(overrides, "include_dir")
+    include_dirs = _v if _v is not None else csv_list(files.get("include_dirs", ""))
+
+    _v = _override(overrides, "exclude_dir")
+    exclude_dirs = _v if _v is not None else csv_list(files.get("exclude_dirs", ""))
+
+    _v = _override(overrides, "depth")
+    max_depth = _v if _v is not None else optional_int(files.get("max_depth"), "Max depth")
+
+    _v = _override(overrides, "min_size")
+    min_size = _v if _v is not None else optional_int(files.get("min_size"), "Min size")
+
+    _v = _override(overrides, "max_size")
+    max_size = _v if _v is not None else optional_int(files.get("max_size"), "Max size")
+
+    _v = _override(overrides, "modified_after")
+    modified_after_raw = _v if _v is not None else str(files.get("modified_after", "")).strip() or None
+
+    _v = _override(overrides, "modified_before")
+    modified_before_raw = _v if _v is not None else str(files.get("modified_before", "")).strip() or None
 
     find_criteria = FileFindCriteria(
         root_dirs=tuple(Path(r) for r in roots),
@@ -139,43 +118,26 @@ def build_processor_config(
         exclude_dir_globs=tuple(exclude_dirs),
     )
 
-    include_patterns = (
-        _override(overrides, "include")
-        if _override(overrides, "include") is not None
-        else analysis.get("include_patterns", [])
-    )
-    exclude_patterns = (
-        _override(overrides, "exclude")
-        if _override(overrides, "exclude") is not None
-        else analysis.get("exclude_patterns", [])
-    )
-    skip_file_patterns = (
-        _override(overrides, "skip_file")
-        if _override(overrides, "skip_file") is not None
-        else analysis.get("skip_file_patterns", [])
-    )
+    _v = _override(overrides, "include")
+    include_patterns = _v if _v is not None else analysis.get("include_patterns", [])
 
-    time_from_raw = (
-        _override(overrides, "time_from")
-        if _override(overrides, "time_from") is not None
-        else str(analysis.get("time_from", "")).strip() or None
-    )
-    time_to_raw = (
-        _override(overrides, "time_to")
-        if _override(overrides, "time_to") is not None
-        else str(analysis.get("time_to", "")).strip() or None
-    )
+    _v = _override(overrides, "exclude")
+    exclude_patterns = _v if _v is not None else analysis.get("exclude_patterns", [])
 
-    case_insensitive = (
-        _override(overrides, "case_insensitive")
-        if _override(overrides, "case_insensitive")
-        else analysis.get("case_insensitive", False)
-    )
-    context_lines = (
-        _override(overrides, "context")
-        if _override(overrides, "context") is not None
-        else optional_int(analysis.get("context_lines", "0"), "Context lines") or 0
-    )
+    _v = _override(overrides, "skip_file")
+    skip_file_patterns = _v if _v is not None else analysis.get("skip_file_patterns", [])
+
+    _v = _override(overrides, "time_from")
+    time_from_raw = _v if _v is not None else str(analysis.get("time_from", "")).strip() or None
+
+    _v = _override(overrides, "time_to")
+    time_to_raw = _v if _v is not None else str(analysis.get("time_to", "")).strip() or None
+
+    _v = _override(overrides, "case_insensitive")
+    case_insensitive = _v if _v is not None else analysis.get("case_insensitive", False)
+
+    _v = _override(overrides, "context")
+    context_lines = _v if _v is not None else optional_int(analysis.get("context_lines", "0"), "Context lines") or 0
 
     search_config = SearchConfig(
         include_patterns=tuple(include_patterns),
@@ -187,11 +149,8 @@ def build_processor_config(
         context_lines=context_lines,
     )
 
-    output_dir_raw = (
-        _override(overrides, "output_dir")
-        if _override(overrides, "output_dir") is not None
-        else str(output.get("output_dir", "")).strip() or None
-    )
+    _v = _override(overrides, "output_dir")
+    output_dir_raw = _v if _v is not None else str(output.get("output_dir", "")).strip() or None
     if not output_dir_raw:
         raise ConfigError("output directory is required")
 
@@ -233,23 +192,15 @@ def build_processor_config(
     if not columns:
         columns = tuple(Column)
 
-    sort_raw = (
-        _override(overrides, "sort")
-        if _override(overrides, "sort") is not None
-        else output.get("sort", "file-order")
-    )
+    _v = _override(overrides, "sort")
+    sort_raw = _v if _v is not None else output.get("sort", "file-order")
     sort = SortOrder.TIMESTAMP if sort_raw == "timestamp" else SortOrder.FILE_ORDER
 
     no_context = _override(overrides, "no_context")
-    include_context = (
-        False if no_context else output.get("include_context", True)
-    )
+    include_context = False if no_context else output.get("include_context", True)
 
-    base_path_raw = (
-        _override(overrides, "base_path")
-        if _override(overrides, "base_path") is not None
-        else str(output.get("base_path", "")).strip() or None
-    )
+    _v = _override(overrides, "path_depth")
+    path_depth = _v if _v is not None else optional_int(output.get("path_depth"), "Path depth")
 
     output_config = OutputConfig(
         output_dir=Path(output_dir_raw),
@@ -257,14 +208,11 @@ def build_processor_config(
         columns=columns,
         sort=sort,
         include_context=include_context,
-        base_path=Path(base_path_raw) if base_path_raw else None,
+        path_depth=path_depth,
     )
 
-    workers = (
-        _override(overrides, "workers")
-        if _override(overrides, "workers") is not None
-        else optional_int(output.get("workers", "1"), "Workers") or 1
-    )
+    _v = _override(overrides, "workers")
+    workers = _v if _v is not None else optional_int(output.get("workers", "1"), "Workers") or 1
 
     return ProcessorConfig(
         find_criteria=find_criteria,

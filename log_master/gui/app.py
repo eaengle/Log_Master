@@ -19,6 +19,7 @@ named config files.
 from __future__ import annotations
 
 import calendar
+import dataclasses
 import json
 import threading
 import tkinter as tk
@@ -280,6 +281,17 @@ def _pattern_list_widget(parent, label: str, row: int) -> tk.Listbox:
         for i in reversed(lb.curselection()):
             lb.delete(i)
 
+    def edit_selected(_event=None):
+        sel = lb.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        entry_var.set(lb.get(idx))
+        lb.delete(idx)
+        entry.focus_set()
+        entry.icursor(tk.END)
+
+    lb.bind("<Double-Button-1>", edit_selected)
     entry.bind("<Return>", lambda _: add())
     ttk.Button(frame, text="Add", command=add, width=6).grid(
         row=1, column=1, padx=2)
@@ -399,12 +411,6 @@ class FilesTab(ttk.Frame):
         self._exc_dir_var.set(state.get("exclude_dirs", ""))
 
     def build_criteria(self) -> FileFindCriteria:
-        def parse_date(s: str, field: str) -> datetime | None:
-            s = s.strip()
-            if not s:
-                return None
-            return parse_datetime(s, field)
-
         def parse_int(var: tk.StringVar, field: str) -> int | None:
             s = var.get().strip()
             if not s:
@@ -414,6 +420,8 @@ class FilesTab(ttk.Frame):
             except ValueError:
                 raise ValueError(f"{field}: expected integer, got '{s}'")
 
+        mod_after = self._mod_after_var.get().strip()
+        mod_before = self._mod_before_var.get().strip()
         return FileFindCriteria(
             root_dirs=[Path(r) for r in self.roots()],
             name_globs=self._csv(self._globs_var),
@@ -421,8 +429,8 @@ class FilesTab(ttk.Frame):
             max_depth=parse_int(self._depth_var, "Max depth"),
             min_size_bytes=parse_int(self._min_size_var, "Min size"),
             max_size_bytes=parse_int(self._max_size_var, "Max size"),
-            modified_after=parse_date(self._mod_after_var.get(), "Modified after"),
-            modified_before=parse_date(self._mod_before_var.get(), "Modified before"),
+            modified_after=parse_datetime(mod_after, "Modified after") if mod_after else None,
+            modified_before=parse_datetime(mod_before, "Modified before") if mod_before else None,
             include_dir_globs=self._csv(self._inc_dir_var),
             exclude_dir_globs=self._csv(self._exc_dir_var),
         )
@@ -484,24 +492,20 @@ class AnalysisTab(ttk.Frame):
         self._context_var.set(state.get("context_lines", "0"))
 
     def build_config(self) -> SearchConfig:
-        def parse_dt(s: str, field: str):
-            s = s.strip()
-            if not s:
-                return None
-            return parse_datetime(s, field)
-
         ctx = self._context_var.get().strip()
         try:
             context_lines = int(ctx) if ctx else 0
         except ValueError:
             raise ValueError(f"Context lines: expected integer, got '{ctx}'")
 
+        time_from = self._time_from_var.get().strip()
+        time_to = self._time_to_var.get().strip()
         return SearchConfig(
             include_patterns=tuple(_listbox_items(self._include_lb)),
             exclude_patterns=tuple(_listbox_items(self._exclude_lb)),
             skip_file_patterns=tuple(_listbox_items(self._skip_lb)),
-            time_from=parse_dt(self._time_from_var.get(), "Time from"),
-            time_to=parse_dt(self._time_to_var.get(), "Time to"),
+            time_from=parse_datetime(time_from, "Time from") if time_from else None,
+            time_to=parse_datetime(time_to, "Time to") if time_to else None,
             case_sensitive=not self._case_var.get(),
             context_lines=context_lines,
         )
@@ -598,17 +602,10 @@ class OutputTab(ttk.Frame):
         ttk.Label(opts, text="(0=auto, 1=serial)").grid(
             row=1, column=2, sticky="w", padx=4)
 
-        self._base_path_var = _labeled_entry(opts, "Base path:", 2, width=30)
-        ttk.Label(opts, text="(source_file written relative to this)").grid(
+        self._path_depth_var = _labeled_spin(opts, "Path depth:", 2,
+                                              from_=0, to=99, default="")
+        ttk.Label(opts, text="(parent folders shown; blank = full relative path)").grid(
             row=2, column=2, sticky="w", padx=4)
-
-        def browse_base():
-            d = filedialog.askdirectory(title="Select base path")
-            if d:
-                self._base_path_var.set(d)
-
-        ttk.Button(opts, text="Browse…", command=browse_base).grid(
-            row=2, column=3, padx=4)
 
     def output_dir(self) -> str:
         return self._out_dir_var.get().strip()
@@ -632,7 +629,7 @@ class OutputTab(ttk.Frame):
                                 for col, var in self._col_vars.items()},
             "include_context": self._inc_ctx_var.get(),
             "workers":         self._workers_var.get(),
-            "base_path":       self._base_path_var.get(),
+            "path_depth":      self._path_depth_var.get(),
         }
 
     def set_state(self, state: dict) -> None:
@@ -647,7 +644,7 @@ class OutputTab(ttk.Frame):
             var.set(cols.get(_COL_KEY[col], True))
         self._inc_ctx_var.set(state.get("include_context", True))
         self._workers_var.set(state.get("workers", "1"))
-        self._base_path_var.set(state.get("base_path", ""))
+        self._path_depth_var.set(state.get("path_depth", ""))
 
     def build_config(self) -> OutputConfig:
         out_dir = self.output_dir()
@@ -674,7 +671,11 @@ class OutputTab(ttk.Frame):
                 if self._sort_var.get() == "timestamp"
                 else SortOrder.FILE_ORDER)
 
-        base_raw = self._base_path_var.get().strip()
+        depth_raw = self._path_depth_var.get().strip()
+        try:
+            path_depth = int(depth_raw) if depth_raw else None
+        except ValueError:
+            raise ValueError(f"Path depth: expected integer, got '{depth_raw}'")
 
         return OutputConfig(
             output_dir=Path(out_dir),
@@ -682,7 +683,7 @@ class OutputTab(ttk.Frame):
             columns=columns,
             sort=sort,
             include_context=self._inc_ctx_var.get(),
-            base_path=Path(base_raw) if base_raw else None,
+            path_depth=path_depth,
         )
 
 
@@ -699,8 +700,9 @@ class ResultsTab(ttk.Frame):
 
         self._get_config = get_config_fn
         self._running = False
+        self._stop_event: threading.Event | None = None
 
-        # Run button
+        # Run / Cancel buttons
         btn_frame = ttk.Frame(self)
         btn_frame.grid(row=0, column=0, sticky="ew", pady=4)
 
@@ -708,12 +710,18 @@ class ResultsTab(ttk.Frame):
                                    command=self._start_run, width=14)
         self._run_btn.pack(side="left", padx=4)
 
+        self._cancel_btn = ttk.Button(btn_frame, text="Stop",
+                                      command=self._on_cancel, width=8,
+                                      state="disabled")
+        self._cancel_btn.pack(side="left", padx=4)
+
         self._status_var = tk.StringVar(value="Ready")
         ttk.Label(btn_frame, textvariable=self._status_var,
                   foreground="gray").pack(side="left", padx=12)
 
-        # Progress bar
-        self._progress = ttk.Progressbar(self, mode="indeterminate")
+        # Progress bar (determinate; switches to indeterminate while discovering files)
+        self._progress = ttk.Progressbar(self, mode="determinate",
+                                         maximum=1, value=0)
         self._progress.grid(row=1, column=0, sticky="ew", padx=4, pady=2)
 
         # Results text area
@@ -749,9 +757,16 @@ class ResultsTab(ttk.Frame):
             messagebox.showerror("Configuration error", str(exc))
             return
 
+        self._stop_event = threading.Event()
+        cfg = dataclasses.replace(cfg,
+                                  stop_event=self._stop_event,
+                                  on_progress=self._on_progress)
+
         self._running = True
         self._run_btn.configure(state="disabled")
+        self._cancel_btn.configure(state="normal")
         self._status_var.set("Running…")
+        self._progress.configure(mode="indeterminate", value=0)
         self._progress.start(12)
         self._clear()
         self._log("Starting…")
@@ -765,10 +780,31 @@ class ResultsTab(ttk.Frame):
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _on_progress(self, done: int, total: int) -> None:
+        def update():
+            if str(self._progress["mode"]) == "indeterminate":
+                self._progress.stop()
+                self._progress.configure(mode="determinate",
+                                         maximum=max(total, 1))
+            self._progress["value"] = done
+            self._status_var.set(f"Processing {done} / {total}…")
+        self.after(0, update)
+
+    def _on_cancel(self) -> None:
+        if self._stop_event is not None:
+            self._stop_event.set()
+        self._cancel_btn.configure(state="disabled")
+        self._status_var.set("Cancelling…")
+
     def _on_done(self, result: ProcessorResult, cfg: ProcessorConfig) -> None:
         self._progress.stop()
+        self._progress.configure(mode="determinate",
+                                 maximum=max(result.files_found, 1),
+                                 value=result.files_found)
         self._run_btn.configure(state="normal")
-        self._status_var.set("Done")
+        self._cancel_btn.configure(state="disabled")
+        cancelled = self._stop_event is not None and self._stop_event.is_set()
+        self._status_var.set("Cancelled" if cancelled else "Done")
         self._running = False
 
         self._log(f"Files found   : {result.files_found}")
@@ -779,7 +815,9 @@ class ResultsTab(ttk.Frame):
 
     def _on_error(self, exc: Exception) -> None:
         self._progress.stop()
+        self._progress.configure(mode="determinate", value=0)
         self._run_btn.configure(state="normal")
+        self._cancel_btn.configure(state="disabled")
         self._status_var.set("Error")
         self._running = False
         self._log(f"ERROR: {exc}")

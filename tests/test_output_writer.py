@@ -26,6 +26,7 @@ from log_master.core.output_writer import (
 
 def make_result(
     source: Path,
+    root: Path | None = None,
     line_no: int = 1,
     timestamp: datetime = datetime(2024, 3, 15, 8, 0, 0),
     text: str = "INFO message",
@@ -51,6 +52,7 @@ def make_result(
     )
     return MatchResult(
         source_file=source,
+        root=root if root is not None else source.parent,
         line_no=line_no,
         timestamp=timestamp,
         text=text,
@@ -330,23 +332,47 @@ class TestColumnSelection:
         rows = read_tsv(tmp_path / "out" / "results.tsv")
         assert list(rows[0].keys()) == ["line_no", "text", "timestamp"]
 
-    def test_source_file_absolute_by_default(self, tmp_path):
+    def test_source_file_relative_to_root_by_default(self, tmp_path):
         src = tmp_path / "app.log"
+        # root=tmp_path → relative path is just "app.log"
         run_writer(
-            [make_result(src)],
+            [make_result(src, root=tmp_path)],
             tmp_path / "out",
             columns=(Column.SOURCE_FILE,),
         )
         rows = read_tsv(tmp_path / "out" / "results.tsv")
-        assert Path(rows[0]["source_file"]).is_absolute()
+        assert rows[0]["source_file"] == "app.log"
 
-    def test_source_file_relative_to_base_path(self, tmp_path):
+    def test_source_file_path_depth_zero_filename_only(self, tmp_path):
         src = tmp_path / "logs" / "app.log"
         run_writer(
-            [make_result(src)],
+            [make_result(src, root=tmp_path)],
             tmp_path / "out",
             columns=(Column.SOURCE_FILE,),
-            base_path=tmp_path,
+            path_depth=0,
+        )
+        rows = read_tsv(tmp_path / "out" / "results.tsv")
+        assert rows[0]["source_file"] == "app.log"
+
+    def test_source_file_path_depth_one_includes_parent(self, tmp_path):
+        src = tmp_path / "logs" / "web" / "app.log"
+        run_writer(
+            [make_result(src, root=tmp_path)],
+            tmp_path / "out",
+            columns=(Column.SOURCE_FILE,),
+            path_depth=1,
+        )
+        rows = read_tsv(tmp_path / "out" / "results.tsv")
+        assert rows[0]["source_file"] == str(Path("web") / "app.log")
+
+    def test_source_file_path_depth_clamped_to_available(self, tmp_path):
+        # depth=5 but only 1 parent exists → returns full relative path
+        src = tmp_path / "logs" / "app.log"
+        run_writer(
+            [make_result(src, root=tmp_path)],
+            tmp_path / "out",
+            columns=(Column.SOURCE_FILE,),
+            path_depth=5,
         )
         rows = read_tsv(tmp_path / "out" / "results.tsv")
         assert rows[0]["source_file"] == str(Path("logs") / "app.log")

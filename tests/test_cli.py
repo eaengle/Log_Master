@@ -379,14 +379,14 @@ class TestOutputFlags:
         rows = read_tsv(out / "results.tsv")
         assert set(rows[0].keys()) == {"text", "line_no"}
 
-    def test_base_path_makes_source_relative(self, tmp_path):
+    def test_path_depth_trims_source_file(self, tmp_path):
         root = tmp_path / "logs"
         write_log(root / "app.log", ["2024-01-01 09:00:00 INFO hi"])
         out = tmp_path / "out"
         run(["--root", str(root), "--output-dir", str(out),
-             "--columns", "source_file", "--base-path", str(tmp_path)])
+             "--columns", "source_file", "--path-depth", "0"])
         rows = read_tsv(out / "results.tsv")
-        assert not Path(rows[0]["source_file"]).is_absolute()
+        assert rows[0]["source_file"] == "app.log"
 
 
 # ---------------------------------------------------------------------------

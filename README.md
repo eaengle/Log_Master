@@ -71,8 +71,8 @@ logmaster [--config FILE] [file discovery options] [search options] [output opti
 | `--depth N` | Maximum directory recursion depth |
 | `--min-size BYTES` | Minimum file size |
 | `--max-size BYTES` | Maximum file size |
-| `--modified-after DATE` | Files modified after DATE (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM:SS`) |
-| `--modified-before DATE` | Files modified before DATE |
+| `--modified-after DATE` | Files modified after DATE (`YYYY-MM-DD`, `YYYY-MM-DDTHH:MM`, or `YYYY-MM-DDTHH:MM:SS`) |
+| `--modified-before DATE` | Files modified before DATE (same formats) |
 | `--include-dir PATTERN` | Only descend into directories matching PATTERN (repeatable) |
 | `--exclude-dir PATTERN` | Skip directories matching PATTERN (repeatable) |
 
@@ -97,7 +97,7 @@ logmaster [--config FILE] [file discovery options] [search options] [output opti
 | `--columns COLS` | Comma-separated column list (default: all columns) |
 | `--sort ORDER` | `file-order` (default) or `timestamp` |
 | `--no-context` | Omit context lines from output rows |
-| `--base-path PATH` | Strip this prefix from `source_file` column paths |
+| `--path-depth N` | Parent folders to include in `source_file`: `0` = filename only, `1` = one parent, etc. (default: full path relative to root) |
 | `--workers N` / `-w` | Worker threads: `0` = auto (up to 8), `1` = serial (default: `1`) |
 
 ### Output Columns
@@ -107,7 +107,7 @@ Each output row is a TSV record with these columns:
 | Column | Description |
 |---|---|
 | `timestamp` | ISO 8601 timestamp extracted from the log line |
-| `source_file` | Full path to the source log file |
+| `source_file` | Path to the source log file, relative to the root it was discovered under (trimmed further by `--path-depth` if set) |
 | `line_no` | 1-based line number within the source file |
 | `pattern` | The include pattern that matched (empty for context lines) |
 | `text` | The log line with the timestamp span removed |
@@ -167,7 +167,7 @@ config file can be created in either tool and used by both.
     },
     "include_context": true,
     "workers": "4",
-    "base_path": ""
+    "path_depth": ""
   }
 }
 ```
@@ -215,7 +215,7 @@ log_master/
     main.py               # argparse CLI entry point
   gui/
     app.py                # Tkinter four-tab desktop interface
-tests/                    # pytest test suite (274 tests)
+tests/                    # pytest test suite (304 tests)
 sample_logs/              # Sample log files for manual testing
 pyproject.toml
 ```

@@ -16,8 +16,10 @@ on flush regardless.
 from __future__ import annotations
 
 import os
+import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .expression_analyzer import ExpressionAnalyzer, SearchConfig
 from .file_finder import FileFindCriteria, FileFinder
@@ -39,12 +41,16 @@ class ProcessorConfig:
     search_config : include/exclude/skip patterns, time range, context lines.
     output_config : TSV routing, columns, sort order.
     workers       : 1=serial, 0=auto (min(8, cpu_count())), >1=explicit.
+    stop_event    : set() to request graceful cancellation mid-run.
+    on_progress   : called with (files_done, files_total) after each file.
     """
 
     find_criteria: FileFindCriteria
     search_config: SearchConfig
     output_config: OutputConfig
     workers: int = 1
+    stop_event: threading.Event | None = field(default=None, compare=False)
+    on_progress: Callable[[int, int], None] | None = field(default=None, compare=False)
 
 
 # ---------------------------------------------------------------------------
@@ -85,15 +91,18 @@ class LogProcessor:
         Execute the full pipeline and return summary counts.
 
         Discovers files, analyses each one, writes matching results to the
-        configured output, and returns a ProcessorResult.
+        configured output, and returns a ProcessorResult.  Checks stop_event
+        between files and calls on_progress(done, total) after each file.
         """
         cfg = self._config
         finder = FileFinder(cfg.find_criteria)
         files = list(finder.find())
+        total = len(files)
 
         analyzer = ExpressionAnalyzer(cfg.search_config)
         resolver = TimestampResolver()
 
+        files_done = 0
         files_skipped = 0
         matches_total = 0
         workers = self._resolve_workers()
@@ -105,16 +114,21 @@ class LogProcessor:
                 else self._run_parallel(files, analyzer, resolver, workers)
             )
             for far in iterator:
+                if cfg.stop_event is not None and cfg.stop_event.is_set():
+                    break
                 if far.was_skipped:
                     files_skipped += 1
                 else:
                     for match in far.matches:
                         writer.add_result(match)
                         matches_total += 1
+                files_done += 1
+                if cfg.on_progress is not None:
+                    cfg.on_progress(files_done, total)
 
         return ProcessorResult(
-            files_found=len(files),
-            files_analyzed=len(files) - files_skipped,
+            files_found=total,
+            files_analyzed=files_done - files_skipped,
             files_skipped=files_skipped,
             matches_total=matches_total,
         )

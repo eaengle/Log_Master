@@ -36,10 +36,11 @@ def write_log(
     if mtime is not None:
         ts = mtime.timestamp()
         os.utime(path, (ts, ts))
-        return FileInfo(path=path, size_bytes=path.stat().st_size, mtime=mtime)
+        return FileInfo(path=path, root=path.parent, size_bytes=path.stat().st_size, mtime=mtime)
     stat = path.stat()
     return FileInfo(
         path=path,
+        root=path.parent,
         size_bytes=stat.st_size,
         mtime=datetime.fromtimestamp(stat.st_mtime),
     )

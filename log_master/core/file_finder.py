@@ -14,6 +14,7 @@ class FileInfo:
     """Metadata for a discovered file."""
 
     path: Path
+    root: Path       # root_dir under which this file was discovered
     size_bytes: int
     mtime: datetime  # local time, timezone-naive
 
@@ -70,13 +71,13 @@ class FileFinder:
         for root in self._c.root_dirs:
             resolved = Path(root).resolve()
             if resolved.is_dir():
-                yield from self._walk(resolved, depth=0)
+                yield from self._walk(resolved, resolved, depth=0)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _walk(self, directory: Path, depth: int) -> Iterator[FileInfo]:
+    def _walk(self, root: Path, directory: Path, depth: int) -> Iterator[FileInfo]:
         try:
             entries = list(directory.iterdir())
         except PermissionError:
@@ -88,7 +89,7 @@ class FileFinder:
         dirs = sorted((e for e in entries if e.is_dir()), key=lambda e: e.name.lower())
 
         for entry in files:
-            info = self._stat(entry)
+            info = self._stat(entry, root)
             if info is not None and self._file_passes(info):
                 yield info
 
@@ -96,13 +97,14 @@ class FileFinder:
             if self._c.max_depth is not None and depth >= self._c.max_depth:
                 continue
             if self._dir_passes(entry):
-                yield from self._walk(entry, depth + 1)
+                yield from self._walk(root, entry, depth + 1)
 
-    def _stat(self, path: Path) -> FileInfo | None:
+    def _stat(self, path: Path, root: Path) -> FileInfo | None:
         try:
             s = path.stat()
             return FileInfo(
                 path=path,
+                root=root,
                 size_bytes=s.st_size,
                 mtime=datetime.fromtimestamp(s.st_mtime),
             )
