@@ -21,11 +21,16 @@ from __future__ import annotations
 import calendar
 import dataclasses
 import json
+import sys
 import threading
 import tkinter as tk
 from datetime import date, datetime
+from importlib import resources
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from log_master.core.config import build_processor_config, parse_datetime
 from log_master.core.expression_analyzer import SearchConfig
@@ -35,6 +40,7 @@ from log_master.core.output_writer import Column, OutputConfig, OutputMode, Sort
 
 # Path used for automatic session save/restore.
 _AUTOSAVE_PATH = Path.home() / ".logmaster" / "last_session.json"
+_WINDOWS_APP_ID = "LogMaster.App"
 
 # Column enum ↔ JSON key mapping (stable across renames).
 _COL_KEY: dict[Column, str] = {
@@ -44,6 +50,17 @@ _COL_KEY: dict[Column, str] = {
     Column.PATTERN:     "pattern",
     Column.TEXT:        "text",
 }
+
+
+def _set_windows_app_id() -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(_WINDOWS_APP_ID)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -831,8 +848,10 @@ class ResultsTab(ttk.Frame):
 
 class App(tk.Tk):
     def __init__(self):
+        _set_windows_app_id()
         super().__init__()
         self.title("Log Master")
+        self._set_app_icon()
         self.geometry("760x640")
         self.minsize(600, 500)
 
@@ -855,6 +874,28 @@ class App(tk.Tk):
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._load_autosave()
+
+    def _set_app_icon(self) -> None:
+        try:
+            assets = resources.files("log_master.assets")
+            if sys.platform == "win32":
+                ico = assets.joinpath("log_master_icon.ico")
+                with resources.as_file(ico) as ico_path:
+                    self.iconbitmap(default=str(ico_path))
+            icon_names = (
+                "log_master_icon_16.png",
+                "log_master_icon_32.png",
+                "log_master_icon_64.png",
+                "log_master_icon.png",
+            )
+            self._icon_images = []
+            for icon_name in icon_names:
+                icon = assets.joinpath(icon_name)
+                with resources.as_file(icon) as icon_path:
+                    self._icon_images.append(tk.PhotoImage(file=str(icon_path)))
+            self.iconphoto(True, *self._icon_images)
+        except Exception:
+            self._icon_images = []
 
     # ------------------------------------------------------------------
     # Menu

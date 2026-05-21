@@ -23,6 +23,9 @@ logmaster-gui = "log_master.gui.app:main"
 where = ["."]
 include = ["log_master*"]
 
+[tool.setuptools.package-data]
+"log_master.assets" = ["*.png", "*.ico"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
